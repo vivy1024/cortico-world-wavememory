@@ -1,0 +1,37 @@
+{
+  "name": "cortico-world-wavememory",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Cortico World: WaveMemory 生成前自动注入（live 库 28 万条记忆 + 多通道编排）",
+  "license": "MIT",
+  "keywords": [
+    "cortico-world",
+    "cortico",
+    "wavememory",
+    "memory"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.5.0",
+  "main": "./src/index.ts",
+  "cortico": {
+    "kind": "world",
+    "api": 4
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "cortico": "^0.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
