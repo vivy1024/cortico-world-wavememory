@@ -120,7 +120,7 @@ describe('WaveMemoryWorld', () => {
 
   it('render 读投递时刻的外部事件并注入桥返回的 block', async () => {
     const calls: unknown[] = [];
-    const bridge = new WaveMemoryBridge('http://127.0.0.1:8030', mockFetch((_url, body) => {
+    const bridge = new WaveMemoryBridge('http://127.0.0.1:9876', mockFetch((_url, body) => {
       calls.push(body);
       return { ok: true, block: '[相关记忆]\n- 台风轨迹真有意思', chars: 20 };
     }));

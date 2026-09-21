@@ -4,21 +4,24 @@ import type { ConfigGroup } from 'cortico/core/types.ts';
 export type WaveMemoryTier = 'full' | 'light' | 'minimal';
 
 export interface WaveMemoryConfigSection extends WorldSection {
-  /** 8030 注入桥 HTTP 地址（不是 8799 备份库 MCP） */
+  /** 9876 AstrBot 认知核心服务地址（统一暴露 /api/runtime/v1 与记忆准备，彻底替代 8030） */
   endpoint: string;
+  /** 访问 Runtime API 的 Bearer Token */
+  authToken?: string;
   /** 默认 RuntimeScope 的 bot_id */
   botId: string;
-  /** 默认 RuntimeScope 的 session_id，如 羽书:group:150727649 */
+  /** 默认 RuntimeScope 的 session_id，如 bilibili:group:24292304 或 羽书:group:150727649 */
   sessionId: string;
-  /** 默认注入分层：light 实测 ~540ms，full 含 FTS ~2.4s */
+  /** 默认注入分层：light / full / minimal */
   tier: WaveMemoryTier;
 }
 
 export const WAVEMEMORY_DEFAULTS = (): WaveMemoryConfigSection => ({
   enabled: false,
-  endpoint: 'http://127.0.0.1:8030',
+  endpoint: 'http://127.0.0.1:9876',
+  authToken: 'yushu-dev-token',
   botId: 'yushu',
-  sessionId: '羽书:group:150727649',
+  sessionId: 'bilibili:group:24292304',
   tier: 'light',
 });
 
@@ -27,10 +30,10 @@ export const WAVEMEMORY_CONFIG_GROUP: ConfigGroup = {
   owner: 'world:wavememory',
   schema: {
     type: 'object',
-    title: 'WaveMemory 记忆注入',
+    title: 'WaveMemory 记忆与书设注入',
     description:
-      '生成前自动注入 live 库记忆（persona / soul_state / 关系 / 语义召回）。'
-      + '后端是 8030 注入桥，直连 WaveMemory 插件 9876 live 库，不是 8799 备份 MCP。',
+      '生成前自动注入 live 库记忆与原著书设（persona / soul_state / 关系 / 语义召回 / 知识图谱）。'
+      + '直连 AstrBot 进程 9876 核心服务。',
     properties: {
       'worlds.wavememory.enabled': {
         type: 'boolean',
@@ -39,7 +42,11 @@ export const WAVEMEMORY_CONFIG_GROUP: ConfigGroup = {
       },
       'worlds.wavememory.endpoint': {
         type: 'string',
-        title: '注入桥地址（默认 http://127.0.0.1:8030）',
+        title: 'WaveMemory 服务地址（默认 http://127.0.0.1:9876）',
+      },
+      'worlds.wavememory.authToken': {
+        type: 'string',
+        title: 'Runtime 鉴权 Token（默认 yushu-dev-token）',
       },
       'worlds.wavememory.botId': {
         type: 'string',
@@ -47,7 +54,7 @@ export const WAVEMEMORY_CONFIG_GROUP: ConfigGroup = {
       },
       'worlds.wavememory.sessionId': {
         type: 'string',
-        title: '默认群 session_id',
+        title: '默认会话 session_id',
       },
       'worlds.wavememory.tier': {
         type: 'string',
