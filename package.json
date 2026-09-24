@@ -1,8 +1,8 @@
 {
   "name": "cortico-world-wavememory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Cortico World: WaveMemory 生成前自动注入（live 库 28 万条记忆 + 多通道编排）",
+  "description": "Cortico World: WaveMemory 注入（与 AstrBot 同一编排器）、QQ/弹幕双向写入与工具注册表代理",
   "license": "MIT",
   "keywords": [
     "cortico-world",
@@ -17,7 +17,7 @@
   "main": "./src/index.ts",
   "cortico": {
     "kind": "world",
-    "api": 4
+    "api": 5
   },
   "files": [
     "src",

@@ -88,11 +88,16 @@ export interface BookLoreGraphResponse {
 }
 
 export interface ObservationEventItem {
+  /** 平台原始消息号（QQ message_id），WaveMemory 用它与 AstrBot 路径去重 */
   event_id: string;
+  /** message=别人说的话，danmaku=弹幕，self=Bot 自己说的话 */
+  kind?: 'message' | 'danmaku' | 'self';
   content: string;
   sender_id?: string;
   sender_name?: string;
   timestamp?: number;
+  group_name?: string;
+  is_at_bot?: boolean;
   scope?: RuntimeScopePayload;
 }
 
@@ -104,12 +109,41 @@ export interface ObservationsBatchRequest {
 export interface ObservationsBatchResponse {
   ok: boolean;
   batch_id?: string;
+  accepted?: number;
+  rejected?: number;
   receipts?: Array<{
     event_id: string;
     status: 'accepted' | 'rejected';
+    kind?: string;
     delivery_state?: string;
     error?: string;
   }>;
+  error?: { code: string; message: string };
+}
+
+/** /capabilities 里的一个工具（WaveMemory 工具注册表导出）。 */
+export interface RuntimeToolInfo {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  group: string;
+  writes: boolean;
+  enabled: boolean;
+}
+
+export interface RuntimeCapabilities {
+  ok: boolean;
+  protocol_version?: string;
+  tiers?: string[];
+  tools?: RuntimeToolInfo[];
+  bot?: { db_id: string; name: string; session_prefix: string; self_ids: string[] } | null;
+}
+
+export interface ToolInvokeResponse {
+  ok: boolean;
+  tool?: string;
+  result?: string;
+  elapsed_ms?: number;
   error?: { code: string; message: string };
 }
 
@@ -180,14 +214,15 @@ export class WaveMemoryBridge {
     };
   }
 
-  async capabilities(timeoutMs = 3000): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-    const url = `${this.endpoint.replace(/\/$/, '')}/api/runtime/v1/capabilities`;
+  async capabilities(timeoutMs = 3000, botId?: string): Promise<{ ok: boolean; data?: RuntimeCapabilities; error?: string }> {
+    const query = botId ? `?bot_id=${encodeURIComponent(botId)}` : '';
+    const url = `${this.endpoint.replace(/\/$/, '')}/api/runtime/v1/capabilities${query}`;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const res = await this.fetchImpl(url, { method: 'GET', headers: this.headers(), signal: ctrl.signal });
       if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-      const data = await res.json();
+      const data = (await res.json()) as RuntimeCapabilities;
       return { ok: true, data };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -253,13 +288,39 @@ export class WaveMemoryBridge {
         body: JSON.stringify(req),
         signal: ctrl.signal,
       });
-      const data = (await res.json()) as ObservationsBatchResponse;
+      const data = (await res.json().catch(() => null)) as ObservationsBatchResponse | null;
+      if (!res.ok || !data) {
+        return data ?? { ok: false, error: { code: 'http_error', message: `HTTP ${res.status}` } };
+      }
       return data;
     } catch (err) {
       return {
         ok: false,
         error: { code: 'network_error', message: err instanceof Error ? err.message : String(err) },
       };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async invokeTool(
+    name: string,
+    req: { scope: RuntimeScopePayload; arguments: Record<string, unknown> },
+    timeoutMs = 8000,
+  ): Promise<ToolInvokeResponse> {
+    const url = `${this.endpoint.replace(/\/$/, '')}/api/runtime/v1/tools/${encodeURIComponent(name)}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({ ...req, source: 'cortico' }),
+        signal: ctrl.signal,
+      });
+      return (await res.json()) as ToolInvokeResponse;
+    } catch (err) {
+      return { ok: false, error: { code: 'network_error', message: err instanceof Error ? err.message : String(err) } };
     } finally {
       clearTimeout(timer);
     }

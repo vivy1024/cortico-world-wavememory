@@ -14,6 +14,10 @@ export interface WaveMemoryConfigSection extends WorldSection {
   sessionId: string;
   /** 默认注入分层：light / full / minimal */
   tier: WaveMemoryTier;
+  /** 把 QQ 消息、弹幕与自己说的话同步写入 WaveMemory（与 AstrBot 路径同一套写入流程） */
+  sync: boolean;
+  /** 同步间隔（毫秒） */
+  syncIntervalMs: number;
 }
 
 export const WAVEMEMORY_DEFAULTS = (): WaveMemoryConfigSection => ({
@@ -23,6 +27,8 @@ export const WAVEMEMORY_DEFAULTS = (): WaveMemoryConfigSection => ({
   botId: 'yushu',
   sessionId: 'bilibili:group:24292304',
   tier: 'light',
+  sync: true,
+  syncIntervalMs: 15000,
 });
 
 export const WAVEMEMORY_CONFIG_GROUP: ConfigGroup = {
@@ -59,6 +65,15 @@ export const WAVEMEMORY_CONFIG_GROUP: ConfigGroup = {
       'worlds.wavememory.tier': {
         type: 'string',
         title: '注入分层（light / full / minimal）',
+      },
+      'worlds.wavememory.sync': {
+        type: 'boolean',
+        title: '把 QQ 消息、弹幕和自己说的话写入 WaveMemory',
+        description: '9876 离线时暂停并记住位置，恢复后补写；与 AstrBot 同时收到的 QQ 消息按消息号去重。',
+      },
+      'worlds.wavememory.syncIntervalMs': {
+        type: 'number',
+        title: '同步间隔（毫秒，默认 15000）',
       },
     },
   },

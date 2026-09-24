@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
   DeferredRendered,
@@ -7,8 +8,9 @@ import type {
   WorldHost,
 } from 'cortico/core/types.ts';
 import { WAVEMEMORY_CONFIG_GROUP, type WaveMemoryConfigSection, type WaveMemoryTier } from './config.ts';
-import { WaveMemoryBridge, type RuntimeScopePayload } from './bridge.ts';
+import { WaveMemoryBridge, type RuntimeScopePayload, type RuntimeToolInfo } from './bridge.ts';
 import { hashQuery, recallQueryText } from './recall-query.ts';
+import { ObservationSync } from './sync.ts';
 
 const ENV_PROMPT_FILE = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 
@@ -33,6 +35,27 @@ export interface WaveMemoryWorldOptions {
   timezone: string;
   bridge?: WaveMemoryBridge;
   renderBudgetMs?: number;
+  /** 同步游标存放目录（WorldContext.dataDir）；缺省时不开写入同步 */
+  dataDir?: string;
+  /** start 时向 9876 拉取工具清单与 Bot 会话前缀（包入口设为 true；直接构造默认关闭） */
+  discoverTools?: boolean;
+}
+
+/**
+ * WaveMemory 工具注册表里的工具在 Cortico 这边的名字：沿用环境提示词里已有的 4 个名字，
+ * 其余把 `wave_memory_` 换成 `wave_`。书设检索走专用接口，不重复暴露。
+ */
+const TOOL_ALIASES: Record<string, string> = {
+  wave_memory_search: 'wave_recall_memory',
+  wave_memory_person_search: 'wave_query_person',
+  wave_memory_propose_fact: 'wave_propose_fact',
+  wave_memory_note_episode: 'wave_note_episode',
+};
+const SKIPPED_REMOTE_TOOLS = new Set(['wave_memory_book_lore_search']);
+const CAPABILITY_REFRESH_MS = 5 * 60_000;
+
+export function cortiToolName(remote: string): string {
+  return TOOL_ALIASES[remote] ?? remote.replace(/^wave_memory_/, 'wave_');
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -54,6 +77,11 @@ export class WaveMemoryWorld implements World {
   private cache: CacheEntry | null = null;
   private inflight: Inflight | null = null;
   private readonly bridge: WaveMemoryBridge;
+  private remoteTools: RuntimeToolInfo[] = [];
+  private sessionPrefix = '';
+  private capabilitiesAt = 0;
+  private sync: ObservationSync | null = null;
+  private syncTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly opts: WaveMemoryWorldOptions) {
     this.bridge = opts.bridge ?? new WaveMemoryBridge(opts.cfg.endpoint, fetch as any, opts.cfg.authToken || 'yushu-dev-token');
@@ -114,7 +142,70 @@ export class WaveMemoryWorld implements World {
     };
   }
 
+  /** 按 QQ 会话地址（group:123 / private:456）拼作用域；前缀取 WaveMemory 返回的 Bot 规范会话前缀。 */
+  private conversationScope(conversation: string, speakerId?: string): RuntimeScopePayload | null {
+    const match = /^(group|private):(\d+)$/i.exec(conversation.trim());
+    if (!match || !this.sessionPrefix) return null;
+    const kind = match[1].toLowerCase() as 'group' | 'private';
+    const prefix = this.sessionPrefix;
+    const subject = kind === 'private' ? match[2] : speakerId;
+    return {
+      bot_id: this.opts.cfg.botId || 'yushu',
+      visibility: kind,
+      session: { id: `${prefix}:${kind}:${match[2]}`, platform_id: prefix, kind, conversation_id: match[2] },
+      subject_principal_id: subject ? `${prefix}:user:${subject}` : undefined,
+    };
+  }
+
+  /** WaveMemory 工具注册表的工具，经 /tools/<name> 调用与 AstrBot 同一个实例。 */
+  private remoteToolDefs(): ToolDef[] {
+    return this.remoteTools
+      .filter((tool) => tool.enabled && !SKIPPED_REMOTE_TOOLS.has(tool.name))
+      .map((tool): ToolDef => {
+        const params = { ...(tool.parameters ?? {}) } as { type?: string; properties?: Record<string, unknown>; required?: string[] };
+        const properties = {
+          ...(params.properties ?? {}),
+          conversation: {
+            type: 'string',
+            description: '可选：QQ 会话地址 group:<群号> 或 private:<QQ号>；不填则记在直播间会话下',
+          },
+        };
+        return {
+          name: cortiToolName(tool.name),
+          description: tool.description,
+          tags: [tool.writes ? 'write' : 'read'],
+          parameters: { ...params, type: 'object', properties },
+          handler: async (args) => {
+            const { conversation, ...rest } = args as Record<string, unknown>;
+            const convText = String(conversation ?? '').trim();
+            const scope = convText ? this.conversationScope(convText) : this.getScopePayload();
+            if (!scope) return `WaveMemory：会话地址 ${convText} 无效，或还没拿到 Bot 会话前缀`;
+            const res = await this.bridge.invokeTool(tool.name, { scope, arguments: rest }, 8000);
+            if (!res.ok) return `WaveMemory ${tool.name} 失败: ${res.error?.message ?? 'unknown'}`;
+            return res.result ?? '';
+          },
+        };
+      });
+  }
+
+  /** 拉取 Bot 会话前缀与工具清单；9876 离线时保留上次结果，工具回落到内置实现。 */
+  async refreshCapabilities(force = false): Promise<boolean> {
+    if (!force && Date.now() - this.capabilitiesAt < CAPABILITY_REFRESH_MS && this.remoteTools.length) return true;
+    const res = await this.bridge.capabilities(3000, this.opts.cfg.botId || 'yushu');
+    if (!res.ok || !res.data?.ok) return false;
+    this.capabilitiesAt = Date.now();
+    this.remoteTools = res.data.tools ?? [];
+    this.sessionPrefix = res.data.bot?.session_prefix ?? '';
+    return true;
+  }
+
   tools(): ToolDef[] {
+    const remote = this.remoteToolDefs();
+    const remoteNames = new Set(remote.map((tool) => tool.name));
+    return [...this.staticTools().filter((tool) => !remoteNames.has(tool.name)), ...remote];
+  }
+
+  private staticTools(): ToolDef[] {
     return [
       {
         name: 'wave_book_lore_search',
@@ -291,13 +382,47 @@ export class WaveMemoryWorld implements World {
     this.host = host;
     this.firstTurn = true;
     this.arm();
+    if (this.opts.discoverTools) void this.refreshCapabilities(true).catch(() => false);
+    this.startSync(host);
   }
 
   async stop(): Promise<void> {
+    if (this.syncTimer) clearInterval(this.syncTimer);
+    this.syncTimer = null;
+    this.sync = null;
     this.host = null;
     this.armed = false;
     this.inflight = null;
     this.cache = null;
+  }
+
+  private startSync(host: WorldHost): void {
+    const cfg = this.opts.cfg;
+    if (!cfg.sync || !this.opts.dataDir) return;
+    this.sync = new ObservationSync({
+      bridge: this.bridge,
+      botId: cfg.botId || 'yushu',
+      sessionPrefix: () => this.sessionPrefix,
+      liveSessionId: cfg.sessionId || '',
+      cursorFile: join(this.opts.dataDir, 'wavememory-sync.json'),
+      log: host.log,
+    });
+    const interval = Math.max(3000, Number(cfg.syncIntervalMs) || 15000);
+    this.syncTimer = setInterval(() => void this.syncOnce(), interval);
+    this.syncTimer.unref?.();
+  }
+
+  /** 同步一批观察；QQ 事件需要先拿到 Bot 会话前缀。 */
+  async syncOnce(): Promise<void> {
+    const host = this.host;
+    if (!host || !this.sync) return;
+    if (!this.sessionPrefix) await this.refreshCapabilities(true).catch(() => false);
+    else void this.refreshCapabilities().catch(() => false);
+    const result = await this.sync.tick(host.store).catch((err) => {
+      host.log.warn(`[wavememory] 同步失败: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    });
+    if (result?.error) host.log.warn(`[wavememory] 同步暂停在 #${result.cursor}: ${result.error}`);
   }
 
   onTurnEnded(): void {
