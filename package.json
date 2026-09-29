@@ -25,7 +25,8 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "backfill:games": "tsx scripts/backfill-game-events.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
