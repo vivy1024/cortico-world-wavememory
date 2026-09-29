@@ -1,8 +1,8 @@
 {
   "name": "cortico-world-wavememory",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
-  "description": "Cortico World: WaveMemory 注入（与 AstrBot 同一编排器）、QQ/弹幕双向写入与工具注册表代理",
+  "description": "Cortico World: WaveMemory 注入（与 AstrBot 同一编排器）、对话/口播/游戏经历写回、身份安全提示与工具注册表代理",
   "license": "MIT",
   "keywords": [
     "cortico-world",

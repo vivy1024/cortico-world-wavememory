@@ -4,4 +4,4 @@
 export { WAVEMEMORY as default } from './definition.ts';
 export { WAVEMEMORY } from './definition.ts';
 export { WaveMemoryWorld } from './world.ts';
-export { WAVEMEMORY_DEFAULTS, type WaveMemoryConfigSection } from './config.ts';
+export { WAVEMEMORY_DEFAULTS, WAVEMEMORY_TOKEN_SECRET, type WaveMemoryConfigSection } from './config.ts';

@@ -1,27 +1,39 @@
 /**
- * 把 Cortico 事件库里的 QQ 消息、B 站弹幕和羽书自己说的话同步进 WaveMemory。
+ * 把 Cortico 事件库里的对话、羽书自己说出口的话和游戏经历同步进 WaveMemory。
  *
- * - 定时从事件库游标之后读新事件，按事件来源拼会话：QQ 用 WaveMemory 返回的
- *   Bot 规范会话前缀（`<前缀>:group:<群号>`），与 AstrBot 路径是同一条记忆线；
- *   弹幕用配置里的直播间会话。
- * - WaveMemory 写入的是和 AstrBot 消息钩子相同的流程（记住/忘记、黑话、纠错、好感）。
- * - 9876 不在线或返回错误时游标不前进，恢复后从断点补写；游标存在 dataDir。
- * - event_id 用 QQ 原始消息号，AstrBot 同时收到同一条消息时 WaveMemory 只入库一次。
+ * - 定时从事件库游标之后读新事件，按来源拼会话（见 sessions.ts）：QQ 用 WaveMemory 返回的
+ *   Bot 规范会话前缀，与 AstrBot 路径是同一条记忆线；弹幕、口播、游戏经历用直播间会话；
+ *   终端对话用终端会话。
+ * - 别人说的话走和 AstrBot 消息钩子相同的流程（记住/忘记、黑话、纠错、好感）；羽书说的话走
+ *   Bot 回复流程（事后记账、日记、自省）；游戏经历按她自己的经历入库，不走群友处理。
+ * - 9876 不在线或返回错误时游标不前进，恢复后从断点补写；游标与游戏跟踪状态一起存在 dataDir。
+ * - event_id：QQ 用原始消息号（与 AstrBot 同时收到时只入库一次），其余用 Cortico 事件游标，
+ *   部署内唯一且重放稳定。
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { EventEnvelope, EventStoreReader } from 'cortico/core/types.ts';
 import type { ObservationEventItem, RuntimeScopePayload, WaveMemoryBridge } from './bridge.ts';
+import { DEFAULT_TERMINAL_SESSION_ID } from './config.ts';
+import { GameTracker, restoreGameState, type GameEventDraft, type GameTrackerState } from './games.ts';
+import { liveScope, terminalScope, terminalSenderId } from './sessions.ts';
+import { spokenText, type CallLedger } from './speech.ts';
 
 export interface SyncOptions {
   bridge: WaveMemoryBridge;
   botId: string;
   /** QQ 会话前缀（Bot Profile 的 session_prefix）；取不到时不同步 QQ 事件，避免写成另一条线 */
   sessionPrefix: () => string;
-  /** 弹幕所属的直播间会话，如 bilibili:group:24292304 */
+  /** 直播间会话，如 bilibili:group:24292304：弹幕、口播与游戏经历 */
   liveSessionId: string;
+  /** 终端对话的会话，默认 terminal:private:operator */
+  terminalSessionId?: string;
+  /** 输出旁路记下的工具调用（vtuber_act 台本、mc_goal 指令） */
+  calls?: CallLedger | null;
   cursorFile: string;
   batchSize?: number;
+  /** 同步时见到 vtuber World 的事件（用来决定要不要挂输出旁路） */
+  onSource?: (source: string) => void;
   log?: { info(msg: string): void; warn(msg: string): void };
 }
 
@@ -33,8 +45,15 @@ export interface SyncResult {
   error?: string;
 }
 
+export interface MapContext {
+  botId: string;
+  sessionPrefix: string;
+  liveSessionId: string;
+  terminalSessionId?: string;
+  calls?: CallLedger | null;
+}
+
 const QQ_TYPES = new Set(['qq.message', 'qq.self']);
-const LIVE_TYPES = new Set(['bilibili.danmaku']);
 
 interface QqConv { kind: 'group' | 'private'; id: number }
 
@@ -56,12 +75,15 @@ export function qqBody(text: string, speaker: string): string {
   return (generic ? text.slice(generic[0].length) : text).trim();
 }
 
-function splitSession(sessionId: string): { platform: string; kind: string; conv: string } {
-  const [platform = '', kind = 'group', ...rest] = sessionId.split(':');
-  return { platform, kind, conv: rest.join(':') };
+function selfItem(eventId: string, content: string, timestamp: number, scope: RuntimeScopePayload | null): ObservationEventItem | null {
+  const text = content.trim();
+  if (!text || !scope) return null;
+  // 自己说的话不带发言人（私聊作用域的主体仍是对方）。
+  return { event_id: eventId, kind: 'self', content: text, timestamp, scope };
 }
 
-export function toObservation(env: EventEnvelope, opts: { botId: string; sessionPrefix: string; liveSessionId: string }): ObservationEventItem | null {
+/** 事件 → 一条对话/自己说的话（QQ、弹幕、终端、我的世界聊天）；不是这几类返回 null。 */
+export function toObservation(env: EventEnvelope, opts: MapContext): ObservationEventItem | null {
   const meta = (env.meta ?? {}) as Record<string, unknown>;
   if (QQ_TYPES.has(env.type)) {
     const conv = meta.conv as QqConv | undefined;
@@ -98,11 +120,15 @@ export function toObservation(env: EventEnvelope, opts: { botId: string; session
       scope,
     };
   }
-  if (LIVE_TYPES.has(env.type)) {
+  if (env.type === 'bilibili.danmaku') {
+    // 原始弹幕先以 archive-only 归档，再由候选处理投递一份（meta.sourceCursors 指回归档）；
+    // 只写原始那份，否则同一条弹幕会被记住、计好感两次。
+    if (Array.isArray(meta.sourceCursors)) return null;
     const body = str(meta.body).trim();
     const uid = str(meta.uid);
     if (!body || !uid || !opts.liveSessionId) return null;
-    const { platform, kind, conv } = splitSession(opts.liveSessionId);
+    const scope = liveScope(opts.botId, opts.liveSessionId, uid);
+    if (!scope) return null;
     return {
       // 弹幕没有平台消息号：用 Cortico 事件游标，部署内唯一且重放稳定。
       event_id: `cortico:${env.cursor}`,
@@ -111,29 +137,114 @@ export function toObservation(env: EventEnvelope, opts: { botId: string; session
       sender_id: uid,
       sender_name: str(meta.uname),
       timestamp: tsSeconds(env.ts),
-      scope: {
-        bot_id: opts.botId,
-        visibility: 'group',
-        session: { id: opts.liveSessionId, platform_id: platform, kind, conversation_id: conv },
-        subject_principal_id: `${platform}:user:${uid}`,
-      },
+      scope: { ...scope, subject_principal_id: `${scope.session!.platform_id}:user:${uid}` },
     };
   }
+  if (env.type === 'terminal.message' || env.type === 'terminal.self') {
+    const session = opts.terminalSessionId || DEFAULT_TERMINAL_SESSION_ID;
+    const scope = terminalScope(opts.botId, session);
+    const body = str(meta.body).trim();
+    if (!scope || !body) return null;
+    if (env.type === 'terminal.self') return selfItem(`cortico:${env.cursor}`, body, tsSeconds(env.ts), scope);
+    return {
+      event_id: `cortico:${env.cursor}`,
+      kind: 'message',
+      content: body,
+      sender_id: terminalSenderId(session),
+      sender_name: str(meta.from) || str(env.senderKey) || '操作员',
+      timestamp: tsSeconds(env.ts),
+      // 终端里的话都是对她说的。
+      is_at_bot: true,
+      scope,
+    };
+  }
+  if (env.type === 'minecraft.chat' && env.senderKey === 'minecraft') {
+    // 我的世界 World 只给自己发的聊天不带发言人键（别人的是玩家名，服务器消息是 Server）。
+    const m = /^\[MC\] [^:]{1,32}: ([\s\S]+)$/.exec(str(env.text));
+    if (!m) return null;
+    return selfItem(`cortico:${env.cursor}`, `[我的世界聊天] ${m[1].trim()}`, tsSeconds(env.ts), liveScope(opts.botId, opts.liveSessionId));
+  }
   return null;
+}
+
+/**
+ * 口播：vtuber_act 播完（completed）写整段台本，被打断（vtuber.act.outcome）写已播出的部分，
+ * 播放失败或还没开口的不写。台本来自输出旁路按 call_id 记下的工具参数，去掉演出标签。
+ * 时间用她开口（调用闭合）的时刻，和弹幕按先后交错。
+ */
+export function speechObservations(env: EventEnvelope, opts: MapContext): ObservationEventItem[] {
+  if (env.source !== 'vtuber') return [];
+  const meta = (env.meta ?? {}) as Record<string, unknown>;
+  const scope = liveScope(opts.botId, opts.liveSessionId);
+  if (!scope) return [];
+  if (env.type === 'vtuber.playback.finished') {
+    const playback = (meta.playback ?? {}) as { callId?: unknown; state?: unknown };
+    if (playback.state !== 'completed') return [];
+    const call = opts.calls?.get(str(playback.callId));
+    if (!call?.script) return [];
+    const item = selfItem(`cortico:${env.cursor}`, spokenText(call.script), call.at / 1000, scope);
+    return item ? [item] : [];
+  }
+  if (env.type === 'vtuber.act.outcome') {
+    const outcomes = Array.isArray(meta.outcomes) ? meta.outcomes as Array<Record<string, unknown>> : [];
+    const out: ObservationEventItem[] = [];
+    outcomes.forEach((row, index) => {
+      const callId = str(row.callId);
+      const at = opts.calls?.get(callId)?.at;
+      const item = selfItem(
+        `cortico:${env.cursor}:${callId || index}`,
+        spokenText(str(row.script)),
+        at !== undefined ? at / 1000 : tsSeconds(env.ts),
+        scope,
+      );
+      if (item) out.push(item);
+    });
+    return out;
+  }
+  return [];
+}
+
+/** 游戏经历 → game_event（直播间会话，不带发言人）。 */
+export function gameObservation(draft: GameEventDraft, opts: MapContext): ObservationEventItem | null {
+  const scope = liveScope(opts.botId, opts.liveSessionId);
+  if (!scope) return null;
+  return {
+    event_id: draft.event_id,
+    kind: 'game_event',
+    content: draft.content,
+    game: draft.game,
+    event_type: draft.event_type,
+    timestamp: draft.timestamp,
+    scope,
+  };
+}
+
+interface CursorFile {
+  cursor?: number;
+  games?: unknown;
 }
 
 export class ObservationSync {
   private running = false;
   private cursor: number | null = null;
+  private readonly games: GameTracker;
 
-  constructor(private readonly opts: SyncOptions) {}
+  constructor(private readonly opts: SyncOptions) {
+    this.games = new GameTracker(undefined, { calls: opts.calls ?? null });
+  }
+
+  /** 同步跟踪到的游戏状态（给 game 字段补目标、角色）。 */
+  gameState(): GameTrackerState {
+    return this.games.snapshot();
+  }
 
   loadCursor(latest: number): number {
     if (this.cursor !== null) return this.cursor;
     try {
-      const saved = JSON.parse(readFileSync(this.opts.cursorFile, 'utf8')) as { cursor?: number };
+      const saved = JSON.parse(readFileSync(this.opts.cursorFile, 'utf8')) as CursorFile;
       if (typeof saved.cursor === 'number' && saved.cursor >= 0) {
         this.cursor = Math.min(saved.cursor, latest);
+        this.games.restore(restoreGameState(saved.games));
         return this.cursor;
       }
     } catch {
@@ -148,10 +259,37 @@ export class ObservationSync {
     this.cursor = cursor;
     try {
       mkdirSync(dirname(this.opts.cursorFile), { recursive: true });
-      writeFileSync(this.opts.cursorFile, JSON.stringify({ cursor, at: new Date().toISOString() }));
+      const tmp = `${this.opts.cursorFile}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ cursor, at: new Date().toISOString(), games: this.games.snapshot() }));
+      renameSync(tmp, this.opts.cursorFile);
     } catch (err) {
       this.opts.log?.warn(`[wavememory] 同步游标写入失败: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /** 一批事件翻成观察；游戏跟踪状态随之推进（调用方失败时负责回滚）。 */
+  private mapBatch(envs: EventEnvelope[]): ObservationEventItem[] {
+    const ctx: MapContext = {
+      botId: this.opts.botId,
+      sessionPrefix: this.opts.sessionPrefix(),
+      liveSessionId: this.opts.liveSessionId,
+      terminalSessionId: this.opts.terminalSessionId,
+      calls: this.opts.calls ?? null,
+    };
+    const items: ObservationEventItem[] = [];
+    const sources = new Set<string>();
+    for (const env of envs) {
+      sources.add(env.source);
+      const single = toObservation(env, ctx);
+      if (single) items.push(single);
+      items.push(...speechObservations(env, ctx));
+      for (const draft of this.games.map(env)) {
+        const item = gameObservation(draft, ctx);
+        if (item) items.push(item);
+      }
+    }
+    for (const source of sources) this.opts.onSource?.(source);
+    return items;
   }
 
   /** 同步一批；返回本次扫描/发送/接受条数。进行中时直接跳过，不并发。 */
@@ -164,17 +302,16 @@ export class ObservationSync {
       if (latest <= from) return { scanned: 0, sent: 0, accepted: 0, cursor: from };
       const to = Math.min(latest, from + (this.opts.batchSize ?? 200));
       const envs = store.range({ fromCursor: from + 1, toCursor: to });
-      const sessionPrefix = this.opts.sessionPrefix();
-      const events = envs
-        .map((env) => toObservation(env, { botId: this.opts.botId, sessionPrefix, liveSessionId: this.opts.liveSessionId }))
-        .filter((item): item is ObservationEventItem => item !== null);
+      const before = this.games.snapshot();
+      const events = this.mapBatch(envs);
       if (!events.length) {
         this.saveCursor(to);
         return { scanned: envs.length, sent: 0, accepted: 0, cursor: to };
       }
       const res = await this.opts.bridge.submitObservations({ batch_id: `cortico-${from + 1}-${to}`, events }, 8000);
       if (!res.ok) {
-        // 网络错误或 503：游标不动，下次从同一位置重试。
+        // 网络错误或 503：游标与游戏跟踪状态都不动，下次从同一位置重放出同样的条目。
+        this.games.restore(before);
         return { scanned: envs.length, sent: events.length, accepted: 0, cursor: from, error: res.error?.message ?? 'submit_failed' };
       }
       this.saveCursor(to);

@@ -23,6 +23,16 @@ export interface InjectSpeaker {
   name?: string;
 }
 
+/** 当前在玩的游戏（/context/prepare 的 game 字段）；服务端没有游戏知识通道时忽略。 */
+export interface GameContextPayload {
+  /** 小写游戏标识：minecraft / sts / oni … */
+  id: string;
+  /** 扁平键值：数字或短字符串 */
+  state?: Record<string, string | number>;
+  /** 短词列表 */
+  keywords?: string[];
+}
+
 export interface InjectRequest {
   text: string;
   speaker?: InjectSpeaker;
@@ -31,6 +41,7 @@ export interface InjectRequest {
   limit?: number;
   orchestrate?: boolean;
   scope?: RuntimeScopePayload;
+  game?: GameContextPayload;
 }
 
 export interface InjectResponse {
@@ -41,6 +52,8 @@ export interface InjectResponse {
   elapsed_ms?: number;
   error?: string;
   channels?: Record<string, { status?: string; items?: number }>;
+  /** 身份安全系统提示全文（与 AstrBot 路径加在系统提示词开头的同一段）；旧服务端没有这个字段 */
+  safety_prompt?: string;
 }
 
 export interface BookLoreSearchRequest {
@@ -88,10 +101,10 @@ export interface BookLoreGraphResponse {
 }
 
 export interface ObservationEventItem {
-  /** 平台原始消息号（QQ message_id），WaveMemory 用它与 AstrBot 路径去重 */
+  /** 平台原始消息号（QQ message_id）或 Cortico 事件游标，WaveMemory 用它去重 */
   event_id: string;
-  /** message=别人说的话，danmaku=弹幕，self=Bot 自己说的话 */
-  kind?: 'message' | 'danmaku' | 'self';
+  /** message=别人说的话，danmaku=弹幕，self=Bot 自己说的话，game_event=Bot 自己的游戏经历 */
+  kind?: 'message' | 'danmaku' | 'self' | 'game_event';
   content: string;
   sender_id?: string;
   sender_name?: string;
@@ -99,6 +112,10 @@ export interface ObservationEventItem {
   group_name?: string;
   is_at_bot?: boolean;
   scope?: RuntimeScopePayload;
+  /** game_event：小写游戏标识 */
+  game?: string;
+  /** game_event：death / goal / discovery / milestone / choice / crisis */
+  event_type?: string;
 }
 
 export interface ObservationsBatchRequest {
@@ -198,18 +215,27 @@ export interface FetchLike {
 
 const DEFAULT_TIMEOUT_MS = 2500;
 
+/** 令牌：固定字符串，或每次请求现取（部署 .env 改了不用重启）。空串 = 不带 Authorization。 */
+export type TokenSource = string | (() => string);
+
 export class WaveMemoryBridge {
   constructor(
     private readonly endpoint: string,
     private readonly fetchImpl: FetchLike = fetch as FetchLike,
-    private readonly authToken: string = 'yushu-dev-token',
+    private readonly authToken: TokenSource = '',
   ) {}
 
+  private token(): string {
+    const value = typeof this.authToken === 'function' ? this.authToken() : this.authToken;
+    return String(value ?? '').trim();
+  }
+
   private headers(extra: Record<string, string> = {}): Record<string, string> {
+    const token = this.token();
     return {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      Authorization: `Bearer ${this.authToken}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...extra,
     };
   }
@@ -364,10 +390,11 @@ export class WaveMemoryBridge {
           text: req.text,
           speaker: req.speaker ?? {},
           uid: req.uid,
-          tier: req.tier ?? 'light',
+          tier: req.tier ?? 'full',
           limit: req.limit ?? 5,
           orchestrate: req.orchestrate ?? false,
           scope: req.scope,
+          ...(req.game ? { game: req.game } : {}),
         }),
         signal: ctrl.signal,
       });

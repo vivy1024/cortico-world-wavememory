@@ -3,18 +3,29 @@ import type { ConfigGroup } from 'cortico/core/types.ts';
 
 export type WaveMemoryTier = 'full' | 'light' | 'minimal';
 
+/** 部署 .env 里的 Runtime 令牌名，与 WaveMemory 服务端读取的环境变量同名。 */
+export const WAVEMEMORY_TOKEN_SECRET = 'WAVEMEMORY_RUNTIME_TOKEN';
+
+/** 终端（操作员控制台）对话默认记在这条私聊会话下；与写入同一条线。 */
+export const DEFAULT_TERMINAL_SESSION_ID = 'terminal:private:operator';
+
 export interface WaveMemoryConfigSection extends WorldSection {
   /** 9876 AstrBot 认知核心服务地址（统一暴露 /api/runtime/v1 与记忆准备，彻底替代 8030） */
   endpoint: string;
-  /** 访问 Runtime API 的 Bearer Token */
+  /**
+   * 访问 Runtime API 的 Bearer Token（旧写法，兼容保留）。
+   * 优先读部署 .env 的 WAVEMEMORY_RUNTIME_TOKEN；这里的明文只在 .env 没有时使用，并在启动时警告一次。
+   */
   authToken?: string;
   /** 默认 RuntimeScope 的 bot_id */
   botId: string;
-  /** 默认 RuntimeScope 的 session_id，如 bilibili:group:24292304 或 羽书:group:150727649 */
+  /** 直播间会话 session_id，如 bilibili:group:24292304；弹幕、口播和游戏经历都记在这里 */
   sessionId: string;
-  /** 默认注入分层：light / full / minimal */
+  /** 终端对话的会话 session_id，默认 terminal:private:operator；可改成主人的 QQ 私聊会话 */
+  terminalSessionId?: string;
+  /** 注入分层：full / light / minimal（首轮总是 full，之后按这里；默认每轮 full） */
   tier: WaveMemoryTier;
-  /** 把 QQ 消息、弹幕与自己说的话同步写入 WaveMemory（与 AstrBot 路径同一套写入流程） */
+  /** 把 QQ 消息、弹幕、终端对话、自己说的话和游戏经历同步写入 WaveMemory */
   sync: boolean;
   /** 同步间隔（毫秒） */
   syncIntervalMs: number;
@@ -23,10 +34,11 @@ export interface WaveMemoryConfigSection extends WorldSection {
 export const WAVEMEMORY_DEFAULTS = (): WaveMemoryConfigSection => ({
   enabled: false,
   endpoint: 'http://127.0.0.1:9876',
-  authToken: 'yushu-dev-token',
+  authToken: '',
   botId: 'yushu',
   sessionId: 'bilibili:group:24292304',
-  tier: 'light',
+  terminalSessionId: DEFAULT_TERMINAL_SESSION_ID,
+  tier: 'full',
   sync: true,
   syncIntervalMs: 15000,
 });
@@ -52,7 +64,8 @@ export const WAVEMEMORY_CONFIG_GROUP: ConfigGroup = {
       },
       'worlds.wavememory.authToken': {
         type: 'string',
-        title: 'Runtime 鉴权 Token（默认 yushu-dev-token）',
+        title: 'Runtime 鉴权 Token（旧写法）',
+        description: '建议留空，把令牌写进部署 .env 的 WAVEMEMORY_RUNTIME_TOKEN；两处都有时以 .env 为准。',
       },
       'worlds.wavememory.botId': {
         type: 'string',
@@ -60,15 +73,19 @@ export const WAVEMEMORY_CONFIG_GROUP: ConfigGroup = {
       },
       'worlds.wavememory.sessionId': {
         type: 'string',
-        title: '默认会话 session_id',
+        title: '直播间会话 session_id',
+      },
+      'worlds.wavememory.terminalSessionId': {
+        type: 'string',
+        title: '终端对话会话 session_id（默认 terminal:private:operator）',
       },
       'worlds.wavememory.tier': {
         type: 'string',
-        title: '注入分层（light / full / minimal）',
+        title: '注入分层（full / light / minimal，默认 full）',
       },
       'worlds.wavememory.sync': {
         type: 'boolean',
-        title: '把 QQ 消息、弹幕和自己说的话写入 WaveMemory',
+        title: '把对话、自己说的话和游戏经历写入 WaveMemory',
         description: '9876 离线时暂停并记住位置，恢复后补写；与 AstrBot 同时收到的 QQ 消息按消息号去重。',
       },
       'worlds.wavememory.syncIntervalMs': {
