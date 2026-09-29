@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -103,6 +103,40 @@ describe('ObservationSync', () => {
     // 重启：从文件里的游标继续
     const again = new ObservationSync({ bridge, botId: 'yushu', sessionPrefix: () => '羽书', liveSessionId: '', cursorFile });
     expect(again.loadCursor(10)).toBe(2);
+  });
+
+  it('游标文件记下游戏经历从哪里开始实时同步（gamesFrom）；旧版文件读进来就补上，之后不再变', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wm-sync-'));
+    const read = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
+    const store = new Store([env(1, { type: 'qq.watch', text: 'a' }), env(2, { type: 'qq.watch', text: 'b' })]);
+    const bridge = bridgeReturning([], []);
+    const make = (cursorFile: string) =>
+      new ObservationSync({ bridge, botId: 'yushu', sessionPrefix: () => '', liveSessionId: opts.liveSessionId, cursorFile });
+
+    // 第一次运行：从当前位置开始，游戏经历也从这里开始。
+    const fresh = join(dir, 'fresh.json');
+    await make(fresh).tick(store);
+    expect(read(fresh)).toMatchObject({ cursor: 2, gamesFrom: 2 });
+
+    // v0.2.0 只同步对话，文件里只有 cursor：读进来就定下 gamesFrom 并落盘，游标前进时它不变。
+    const legacy = join(dir, 'legacy.json');
+    writeFileSync(legacy, JSON.stringify({ cursor: 1, at: '2026-09-28T07:00:27.770Z' }));
+    const sync = make(legacy);
+    expect(sync.loadCursor(2)).toBe(1);
+    expect(read(legacy)).toMatchObject({ cursor: 1, gamesFrom: 1, games: { day: '', seen: [] } });
+    expect(await sync.tick(store)).toMatchObject({ cursor: 2 });
+    expect(read(legacy)).toMatchObject({ cursor: 2, gamesFrom: 1 });
+
+    // 重启后照旧读回。
+    store.events.push(env(3, { type: 'qq.watch', text: 'c' }));
+    expect(await make(legacy).tick(store)).toMatchObject({ cursor: 3 });
+    expect(read(legacy)).toMatchObject({ cursor: 3, gamesFrom: 1 });
+
+    // 已有游戏状态却没有 gamesFrom（不记这一项的版本写的）：不知道起点，不瞎编。
+    const unknown = join(dir, 'unknown.json');
+    writeFileSync(unknown, JSON.stringify({ cursor: 2, games: { day: '2026-09-30' } }));
+    expect(await make(unknown).tick(store)).toMatchObject({ cursor: 3 });
+    expect(read(unknown).gamesFrom).toBeUndefined();
   });
 });
 

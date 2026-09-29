@@ -9,6 +9,8 @@
  * - 9876 不在线或返回错误时游标不前进，恢复后从断点补写；游标与游戏跟踪状态一起存在 dataDir。
  * - event_id：QQ 用原始消息号（与 AstrBot 同时收到时只入库一次），其余用 Cortico 事件游标，
  *   部署内唯一且重放稳定。
+ * - 游标文件另记 gamesFrom：游戏经历从这个游标之后开始实时同步（第一次运行、或从只同步对话的
+ *   旧版游标文件升级时定下）。更早的游戏经历由 scripts/backfill-game-events.ts 补录，以它为上限。
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -52,6 +54,9 @@ export interface MapContext {
   terminalSessionId?: string;
   calls?: CallLedger | null;
 }
+
+/** 同步游标文件名（在 World 的 dataDir 下）。 */
+export const SYNC_CURSOR_FILE = 'wavememory-sync.json';
 
 const QQ_TYPES = new Set(['qq.message', 'qq.self']);
 
@@ -219,14 +224,31 @@ export function gameObservation(draft: GameEventDraft, opts: MapContext): Observ
   };
 }
 
+/**
+ * 一条事件经游戏跟踪器翻出的 game_event（跟踪状态随之推进）。实时同步与补录脚本共用：
+ * 同一个跟踪器按游标顺序喂同一段事件，得到同样的条目与 event_id。
+ */
+export function gameObservations(tracker: GameTracker, env: EventEnvelope, opts: MapContext): ObservationEventItem[] {
+  const out: ObservationEventItem[] = [];
+  for (const draft of tracker.map(env)) {
+    const item = gameObservation(draft, opts);
+    if (item) out.push(item);
+  }
+  return out;
+}
+
 interface CursorFile {
   cursor?: number;
   games?: unknown;
+  /** 游戏经历从这个游标之后开始实时同步 */
+  gamesFrom?: number;
 }
 
 export class ObservationSync {
   private running = false;
   private cursor: number | null = null;
+  /** 游戏经历从这个游标之后开始实时同步；null = 不知道（文件由不记这一项的版本写过游戏状态） */
+  private gamesFrom: number | null = null;
   private readonly games: GameTracker;
 
   constructor(private readonly opts: SyncOptions) {
@@ -245,12 +267,20 @@ export class ObservationSync {
       if (typeof saved.cursor === 'number' && saved.cursor >= 0) {
         this.cursor = Math.min(saved.cursor, latest);
         this.games.restore(restoreGameState(saved.games));
+        if (typeof saved.gamesFrom === 'number' && saved.gamesFrom >= 0) {
+          this.gamesFrom = saved.gamesFrom;
+        } else if (saved.games === undefined) {
+          // 只同步对话的旧版游标文件：游戏经历从这里开始同步，马上记下来（补录脚本以它为上限）。
+          this.gamesFrom = this.cursor;
+          this.saveCursor(this.cursor);
+        }
         return this.cursor;
       }
     } catch {
       // 第一次运行：从当前位置开始，不回放历史（历史消息 AstrBot 大多已经写过）。
     }
     this.cursor = latest;
+    this.gamesFrom = latest;
     this.saveCursor(latest);
     return latest;
   }
@@ -260,7 +290,8 @@ export class ObservationSync {
     try {
       mkdirSync(dirname(this.opts.cursorFile), { recursive: true });
       const tmp = `${this.opts.cursorFile}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ cursor, at: new Date().toISOString(), games: this.games.snapshot() }));
+      const gamesFrom = this.gamesFrom !== null ? { gamesFrom: this.gamesFrom } : {};
+      writeFileSync(tmp, JSON.stringify({ cursor, at: new Date().toISOString(), games: this.games.snapshot(), ...gamesFrom }));
       renameSync(tmp, this.opts.cursorFile);
     } catch (err) {
       this.opts.log?.warn(`[wavememory] 同步游标写入失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -283,10 +314,7 @@ export class ObservationSync {
       const single = toObservation(env, ctx);
       if (single) items.push(single);
       items.push(...speechObservations(env, ctx));
-      for (const draft of this.games.map(env)) {
-        const item = gameObservation(draft, ctx);
-        if (item) items.push(item);
-      }
+      items.push(...gameObservations(this.games, env, ctx));
     }
     for (const source of sources) this.opts.onSource?.(source);
     return items;

@@ -228,7 +228,7 @@ export interface GameTrackerOptions {
 }
 
 /** 目标完成指令与快照之间允许的时钟误差。 */
-const GOAL_OP_SLACK_MS = 5_000;
+export const GOAL_OP_SLACK_MS = 5_000;
 
 export class GameTracker {
   private state: GameTrackerState;

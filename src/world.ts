@@ -14,6 +14,8 @@ import {
   DEFAULT_TERMINAL_SESSION_ID,
   WAVEMEMORY_CONFIG_GROUP,
   WAVEMEMORY_TOKEN_SECRET,
+  runtimeToken,
+  type TokenOrigin,
   type WaveMemoryConfigSection,
   type WaveMemoryTier,
 } from './config.ts';
@@ -35,7 +37,7 @@ import {
 } from './recall-query.ts';
 import { liveScope, qqScope, terminalScope } from './sessions.ts';
 import { CallLedger, captureTap } from './speech.ts';
-import { ObservationSync } from './sync.ts';
+import { ObservationSync, SYNC_CURSOR_FILE } from './sync.ts';
 
 const ENV_PROMPT_FILE = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 const SAFETY_SLOT_RE = /\{\{\s*wavememory\.safetyPrompt\b/;
@@ -115,16 +117,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-function readSecret(secret: ((name: string) => string) | undefined, name: string): string {
-  if (!secret) return '';
-  try {
-    return String(secret(name) ?? '').trim();
-  } catch {
-    return '';
-  }
-}
-
-export type TokenOrigin = 'secret' | 'config' | 'none';
+export type { TokenOrigin };
 
 export class WaveMemoryWorld implements World {
   readonly id = 'wavememory';
@@ -175,11 +168,7 @@ export class WaveMemoryWorld implements World {
 
   /** Runtime 令牌：部署密钥 WAVEMEMORY_RUNTIME_TOKEN 优先，其次 config.json 里的旧写法。 */
   token(): { token: string; origin: TokenOrigin } {
-    const fromSecret = readSecret(this.opts.secret, WAVEMEMORY_TOKEN_SECRET);
-    if (fromSecret) return { token: fromSecret, origin: 'secret' };
-    const fromConfig = String(this.opts.cfg.authToken ?? '').trim();
-    if (fromConfig) return { token: fromConfig, origin: 'config' };
-    return { token: '', origin: 'none' };
+    return runtimeToken(this.opts.cfg, this.opts.secret);
   }
 
   private warnToken(host: WorldHost): void {
@@ -600,7 +589,7 @@ export class WaveMemoryWorld implements World {
       liveSessionId: this.liveSessionId(),
       terminalSessionId: this.terminalSessionId(),
       calls: this.calls,
-      cursorFile: join(this.opts.dataDir, 'wavememory-sync.json'),
+      cursorFile: join(this.opts.dataDir, SYNC_CURSOR_FILE),
       onSource: (source) => {
         if (source === 'vtuber') this.vtuberSeen = true;
       },

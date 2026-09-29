@@ -9,6 +9,30 @@ export const WAVEMEMORY_TOKEN_SECRET = 'WAVEMEMORY_RUNTIME_TOKEN';
 /** 终端（操作员控制台）对话默认记在这条私聊会话下；与写入同一条线。 */
 export const DEFAULT_TERMINAL_SESSION_ID = 'terminal:private:operator';
 
+export type TokenOrigin = 'secret' | 'config' | 'none';
+
+/**
+ * Runtime 令牌：部署密钥 WAVEMEMORY_RUNTIME_TOKEN 优先，其次 config.json 里的旧写法 authToken。
+ * World 与补录脚本共用这条规则；secret 读不出（抛错）按没有处理。
+ */
+export function runtimeToken(
+  cfg: { authToken?: string },
+  secret?: (name: string) => string,
+): { token: string; origin: TokenOrigin } {
+  let fromSecret = '';
+  if (secret) {
+    try {
+      fromSecret = String(secret(WAVEMEMORY_TOKEN_SECRET) ?? '').trim();
+    } catch {
+      fromSecret = '';
+    }
+  }
+  if (fromSecret) return { token: fromSecret, origin: 'secret' };
+  const fromConfig = String(cfg.authToken ?? '').trim();
+  if (fromConfig) return { token: fromConfig, origin: 'config' };
+  return { token: '', origin: 'none' };
+}
+
 export interface WaveMemoryConfigSection extends WorldSection {
   /** 9876 AstrBot 认知核心服务地址（统一暴露 /api/runtime/v1 与记忆准备，彻底替代 8030） */
   endpoint: string;
