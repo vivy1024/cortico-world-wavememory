@@ -3,7 +3,7 @@
  *
  * - 定时从事件库游标之后读新事件，按来源拼会话（见 sessions.ts）：QQ 用 WaveMemory 返回的
  *   Bot 规范会话前缀，与 AstrBot 路径是同一条记忆线；弹幕、口播、游戏经历用直播间会话；
- *   终端对话用终端会话。
+ *   控制台对话（World `console`）用控制台会话。
  * - 别人说的话走和 AstrBot 消息钩子相同的流程（记住/忘记、黑话、纠错、好感）；羽书说的话走
  *   Bot 回复流程（事后记账、日记、自省）；游戏经历按她自己的经历入库，不走群友处理。
  * - 9876 不在线或返回错误时游标不前进，恢复后从断点补写；游标与游戏跟踪状态一起存在 dataDir。
@@ -18,7 +18,7 @@ import type { EventEnvelope, EventStoreReader } from 'cortico/core/types.ts';
 import type { ObservationEventItem, RuntimeScopePayload, WaveMemoryBridge } from './bridge.ts';
 import { DEFAULT_TERMINAL_SESSION_ID } from './config.ts';
 import { GameTracker, restoreGameState, type GameEventDraft, type GameTrackerState } from './games.ts';
-import { liveScope, terminalScope, terminalSenderId } from './sessions.ts';
+import { liveScope, consoleScope, consoleSenderId } from './sessions.ts';
 import { spokenText, type CallLedger } from './speech.ts';
 
 export interface SyncOptions {
@@ -28,7 +28,7 @@ export interface SyncOptions {
   sessionPrefix: () => string;
   /** 直播间会话，如 bilibili:group:24292304：弹幕、口播与游戏经历 */
   liveSessionId: string;
-  /** 终端对话的会话，默认 terminal:private:operator */
+  /** 控制台对话的会话，默认 terminal:private:operator（历史会话 id，不要迁移） */
   terminalSessionId?: string;
   /** 输出旁路记下的工具调用（vtuber_act 台本、mc_goal 指令） */
   calls?: CallLedger | null;
@@ -87,7 +87,7 @@ function selfItem(eventId: string, content: string, timestamp: number, scope: Ru
   return { event_id: eventId, kind: 'self', content: text, timestamp, scope };
 }
 
-/** 事件 → 一条对话/自己说的话（QQ、弹幕、终端、我的世界聊天）；不是这几类返回 null。 */
+/** 事件 → 一条对话/自己说的话（QQ、弹幕、控制台、我的世界聊天）；不是这几类返回 null。 */
 export function toObservation(env: EventEnvelope, opts: MapContext): ObservationEventItem | null {
   const meta = (env.meta ?? {}) as Record<string, unknown>;
   if (QQ_TYPES.has(env.type)) {
@@ -145,20 +145,20 @@ export function toObservation(env: EventEnvelope, opts: MapContext): Observation
       scope: { ...scope, subject_principal_id: `${scope.session!.platform_id}:user:${uid}` },
     };
   }
-  if (env.type === 'terminal.message' || env.type === 'terminal.self') {
+  if (env.type === 'console.message' || env.type === 'console.self') {
     const session = opts.terminalSessionId || DEFAULT_TERMINAL_SESSION_ID;
-    const scope = terminalScope(opts.botId, session);
+    const scope = consoleScope(opts.botId, session);
     const body = str(meta.body).trim();
     if (!scope || !body) return null;
-    if (env.type === 'terminal.self') return selfItem(`cortico:${env.cursor}`, body, tsSeconds(env.ts), scope);
+    if (env.type === 'console.self') return selfItem(`cortico:${env.cursor}`, body, tsSeconds(env.ts), scope);
     return {
       event_id: `cortico:${env.cursor}`,
       kind: 'message',
       content: body,
-      sender_id: terminalSenderId(session),
+      sender_id: consoleSenderId(session),
       sender_name: str(meta.from) || str(env.senderKey) || '操作员',
       timestamp: tsSeconds(env.ts),
-      // 终端里的话都是对她说的。
+      // 控制台里的话都是对她说的。
       is_at_bot: true,
       scope,
     };

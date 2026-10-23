@@ -3,9 +3,9 @@
  *
  * - 直播间：配置里的 sessionId（如 bilibili:group:24292304），visibility=group；弹幕的发言人
  *   是 bilibili:user:<uid>；羽书的口播和游戏经历也记在这里，不带发言人。
- * - 终端：Cortico 终端是操作员控制台（事件 origin=internal），默认记在
- *   terminal:private:operator 这条私聊会话；WaveMemory 的私聊作用域只读自己这条线，
- *   操作员说的话不会被直播间、QQ 群的检索带出来。
+ * - 控制台：Cortico 控制台（World `console`，事件 origin=internal）默认记在
+ *   terminal:private:operator 这条私聊会话（历史会话 id，保持不动）；WaveMemory 的私聊作用域只读
+ *   自己这条线，操作员说的话不会被直播间、QQ 群的检索带出来。
  * - QQ：WaveMemory 返回的 Bot 规范会话前缀 + group/private + 号码，与 AstrBot 路径同一条线。
  */
 import type { RuntimeScopePayload } from './bridge.ts';
@@ -47,15 +47,15 @@ export function liveScope(botId: string, liveSessionId: string, uid?: string): R
   return scopeOf(botId, parts, who && who !== '0' ? who : undefined);
 }
 
-/** 终端会话；私聊的主体就是会话对方（默认 operator）。 */
-export function terminalScope(botId: string, terminalSessionId: string): RuntimeScopePayload | null {
-  const parts = splitSession(terminalSessionId);
+/** 控制台会话；私聊的主体就是会话对方（默认 operator）。 */
+export function consoleScope(botId: string, consoleSessionId: string): RuntimeScopePayload | null {
+  const parts = splitSession(consoleSessionId);
   return parts ? scopeOf(botId, parts, parts.kind === 'private' ? undefined : 'operator') : null;
 }
 
-/** 终端里操作员的 sender_id：私聊就是会话对方，否则是 operator。 */
-export function terminalSenderId(terminalSessionId: string): string {
-  const parts = splitSession(terminalSessionId);
+/** 控制台里操作员的 sender_id：私聊就是会话对方，否则是 operator。 */
+export function consoleSenderId(consoleSessionId: string): string {
+  const parts = splitSession(consoleSessionId);
   return parts?.kind === 'private' ? parts.conv : 'operator';
 }
 

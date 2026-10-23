@@ -21,8 +21,8 @@ function danmaku(store: FakeStore, body: string, uid = 10000001, uname = '阿木
   return store.push({ type: 'bilibili.danmaku', source: 'bilibili', ts, text: `[弹幕|${uname}] ${body}`, senderKey: uid > 0 ? String(uid) : undefined, meta: { uid, uname, body } });
 }
 
-function terminal(store: FakeStore, body: string, ts = TS): EventEnvelope {
-  return store.push({ type: 'terminal.message', source: 'terminal', origin: 'internal', ts, text: `[21:00] 控制台: ${body}`, senderKey: '控制台', meta: { from: '控制台', body } });
+function consoleMessage(store: FakeStore, body: string, ts = TS): EventEnvelope {
+  return store.push({ type: 'console.message', source: 'console', origin: 'internal', ts, text: `[21:00] 控制台: ${body}`, senderKey: '控制台', meta: { from: '控制台', body } });
 }
 
 function mockFetch(handler: (url: string, body?: any) => unknown): FetchLike {
@@ -47,13 +47,13 @@ describe('recallQueryText', () => {
     expect(channel).toEqual({ kind: 'live' });
   });
 
-  it('终端说话时只取终端这条线；匿名观众不带号码', () => {
+  it('控制台说话时只取控制台这条线；匿名观众不带号码', () => {
     const store = new FakeStore();
     danmaku(store, '主播好', 0, '阿***');
     expect(recallQueryText(store).speaker).toEqual({ name: '阿***' });
-    terminal(store, '整理一下你的记忆');
+    consoleMessage(store, '整理一下你的记忆');
     const q = recallQueryText(store);
-    expect(q).toEqual({ text: '整理一下你的记忆', speaker: { name: '控制台' }, channel: { kind: 'terminal' } });
+    expect(q).toEqual({ text: '整理一下你的记忆', speaker: { name: '控制台' }, channel: { kind: 'console' } });
   });
 
   it('没有对话时返回空', () => {
@@ -115,7 +115,7 @@ describe('WaveMemoryWorld 注入', () => {
     });
   });
 
-  it('终端 → 终端私聊会话；没在玩游戏就不带 game', async () => {
+  it('控制台 → 控制台私聊会话；没在玩游戏就不带 game', async () => {
     const calls: any[] = [];
     const bridge = new WaveMemoryBridge('http://127.0.0.1:9876', mockFetch((_url, body) => {
       calls.push(body);
@@ -125,7 +125,7 @@ describe('WaveMemoryWorld 注入', () => {
     const world = new WaveMemoryWorld({ cfg: cfg(), timezone: 'Asia/Shanghai', bridge, now: () => NOW });
     await world.start(host);
     danmaku(host.store, '主播好');
-    terminal(host.store, '今晚准备去打末影龙');
+    consoleMessage(host.store, '今晚准备去打末影龙');
     expect(await host.deferred[0].spec.render()).toBe('terminal-block');
     expect(calls[0].text).toBe('今晚准备去打末影龙');
     expect(calls[0].scope).toEqual({
@@ -348,7 +348,7 @@ describe('工具默认会话与输出旁路', () => {
     const tool = world.tools().find((t) => t.name === 'wave_note_concern')!;
     expect((tool.parameters as any).properties.conversation.description).toContain('live=直播间');
 
-    terminal(host.store, '记得明天提醒我备份');
+    consoleMessage(host.store, '记得明天提醒我备份');
     await tool.handler({ topic: '备份' }, {} as never);
     expect(calls.at(-1)!.body).toMatchObject({ arguments: { topic: '备份' }, scope: { session: { id: 'terminal:private:operator' } } });
 
@@ -359,7 +359,7 @@ describe('工具默认会话与输出旁路', () => {
     const later = toolWorld(NOW + 11 * 60_000);
     await later.world.start(later.host);
     await later.world.refreshCapabilities(true);
-    terminal(later.host.store, '记得明天提醒我备份');
+    consoleMessage(later.host.store, '记得明天提醒我备份');
     await later.world.tools().find((t) => t.name === 'wave_note_concern')!.handler({}, {} as never);
     expect(later.calls.at(-1)!.body.scope.session.id).toBe('bilibili:group:24292304');
   });

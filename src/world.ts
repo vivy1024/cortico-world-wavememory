@@ -7,9 +7,10 @@ import type {
   OutputTap,
   ToolDef,
   World,
-  WorldConsoleDecl,
   WorldHost,
+  WorldWebUiDecl,
 } from 'cortico/core/types.ts';
+import type { Language } from 'cortico/core/language.ts';
 import {
   DEFAULT_TERMINAL_SESSION_ID,
   WAVEMEMORY_CONFIG_GROUP,
@@ -35,7 +36,7 @@ import {
   type DialogueChannel,
   type DialogueSpeaker,
 } from './recall-query.ts';
-import { liveScope, qqScope, terminalScope } from './sessions.ts';
+import { liveScope, qqScope, consoleScope } from './sessions.ts';
 import { CallLedger, captureTap } from './speech.ts';
 import { ObservationSync, SYNC_CURSOR_FILE } from './sync.ts';
 
@@ -99,7 +100,8 @@ const CAPABILITY_REFRESH_MS = 5 * 60_000;
 const CONVERSATION_PARAM = {
   type: 'string',
   description:
-    '可选：记在哪个会话。live=直播间，terminal=终端，group:<群号> / private:<QQ号>=QQ 群或私聊；'
+    '可选：记在哪个会话。live=直播间，console=控制台（旧值 terminal / 终端仍兼容），'
+    + 'group:<群号> / private:<QQ号>=QQ 群或私聊；'
     + '不填则用当前这句对话所在的会话（十分钟内没人说话时记在直播间）',
 };
 
@@ -118,6 +120,150 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 export type { TokenOrigin };
+
+/**
+ * 静态工具声明（不含 handler）。`staticTools()` 与 `definition.ts` 的自描述共用这一份，
+ * 保证 describe.tools 与实例工具的名字、说明、参数、标签不会漂移。
+ * 远端 /capabilities 拉来的工具是运行期动态的，不写进这里。
+ */
+export function wavememoryToolDecls(): Array<Omit<ToolDef, 'handler'>> {
+  return [
+    {
+      name: 'wave_book_lore_search',
+      description: '从《没钱修什么仙》全量 1.7 万条原著设定、人物、战术与 GraphRAG 知识库中检索详细背景设定。',
+      tags: ['read'],
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '要检索的书设主题、人物名或设定名词' },
+          mode: { type: 'string', enum: ['hybrid', 'semantic', 'keyword'], description: '检索模式，默认 hybrid' },
+          top_k: { type: 'integer', description: '返回条数，默认 5 条' },
+        },
+        required: ['query'],
+      },
+    },
+    {
+      name: 'wave_book_lore_graph',
+      description: '在《没钱修什么仙》原著知识图谱中查看指定实体的人际关系、宗门归属或法宝关联。',
+      tags: ['read'],
+      parameters: {
+        type: 'object',
+        properties: {
+          entity_name: { type: 'string', description: '实体完整名称（如：磁极神君、张羽）' },
+          depth: { type: 'integer', description: '遍历深度（1 或 2，默认 1）' },
+        },
+        required: ['entity_name'],
+      },
+    },
+    {
+      name: 'wave_recall_memory',
+      description: '从羽书的 28 万条历史记忆库中进行全文检索，回忆过往群聊事件、名场面、梗或约定。',
+      tags: ['read'],
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '要回忆的关键词或话题' },
+          speaker: { type: 'string', description: '可选的指定发言人姓名或ID' },
+          limit: { type: 'integer', description: '返回条数，默认 5 条' },
+          conversation: CONVERSATION_PARAM,
+        },
+        required: ['query'],
+      },
+    },
+    {
+      name: 'wave_query_person',
+      description: '查询某个群友或观众的人物档案、活跃度、别名以及历史印象画像。',
+      tags: ['read'],
+      parameters: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', description: '用户昵称、QQ号或 bili:UID' },
+          conversation: CONVERSATION_PARAM,
+        },
+        required: ['target'],
+      },
+    },
+    {
+      name: 'wave_propose_fact',
+      description: '当直播间观众透露了重要的个人现实事实或稳定偏好时，向 WaveMemory 提审三元组记忆（处于待审核状态，待审期间仅作为当前观众的自述依据）。',
+      tags: ['act'],
+      parameters: {
+        type: 'object',
+        properties: {
+          subject: { type: 'string', description: '事实主体（如用户昵称或 canonical ID，不可捏造）' },
+          predicate: { type: 'string', description: '属性或关系动词（如：偏好、居住地、职业）' },
+          object: { type: 'string', description: '事实客体或属性值' },
+          source_quote: { type: 'string', description: '观众本人的发言原话引用' },
+          conversation: CONVERSATION_PARAM,
+        },
+        required: ['subject', 'predicate', 'object'],
+      },
+    },
+    {
+      name: 'wave_note_episode',
+      description: '记录直播中羽书与观众达成的重要约定、里程碑经历或关键阶段性成果。',
+      tags: ['act'],
+      parameters: {
+        type: 'object',
+        properties: {
+          trigger_text: { type: 'string', description: '引发该经历的起因或观众提议' },
+          outcome: { type: 'string', description: '经历的结果、履约情况或阶段终态' },
+          episode_type: { type: 'string', description: '经历类别，如 live_milestone / agreement / achievement' },
+          conversation: CONVERSATION_PARAM,
+        },
+        required: ['trigger_text', 'outcome'],
+      },
+    },
+    {
+      name: 'wave_meme_lookup',
+      description: '查梗百科。弹幕或群友说的梗、黑话、抽象话看不懂时，或者想接梗但拿不准意思和用法时调用。',
+      tags: ['read'],
+      parameters: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string', description: '要查的梗关键词、黑话或抽象短语' },
+          conversation: CONVERSATION_PARAM,
+        },
+        required: ['keyword'],
+      },
+    },
+    {
+      name: 'wave_game_knowledge',
+      description: '查游戏攻略、机制常识，以及你自己以前玩出来的经验。想知道某个游戏里某件事怎么做、某个机制怎么回事时调用。',
+      tags: ['read'],
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '想了解的游戏机制、任务、BOSS打法或合成配方' },
+          game: { type: 'string', description: '游戏标识，如 minecraft, slay_the_spire 等' },
+          conversation: CONVERSATION_PARAM,
+        },
+        required: ['query'],
+      },
+    },
+    {
+      name: 'wave_affinity',
+      description: '查询当前 Bot 与观众或群友的正式社交关系、好感度档位与历史交情。',
+      tags: ['read'],
+      parameters: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', description: '要查询的目标用户昵称、QQ号或 bili:UID' },
+          conversation: CONVERSATION_PARAM,
+        },
+        required: ['target'],
+      },
+    },
+  ];
+}
+
+const STATIC_TOOL_DECL_BY_NAME = new Map(wavememoryToolDecls().map((decl) => [decl.name, decl]));
+
+function staticToolDecl(name: string): Omit<ToolDef, 'handler'> {
+  const decl = STATIC_TOOL_DECL_BY_NAME.get(name);
+  if (!decl) throw new Error(`unknown static tool ${name}`);
+  return decl;
+}
 
 export class WaveMemoryWorld implements World {
   readonly id = 'wavememory';
@@ -184,12 +330,12 @@ export class WaveMemoryWorld implements World {
   }
 
   /**
-   * 一句对话所在会话的作用域（与 sync.ts 写入同一套划分）：弹幕→直播间，终端→终端会话，
+   * 一句对话所在会话的作用域（与 sync.ts 写入同一套划分）：弹幕→直播间，控制台→控制台会话，
    * QQ→规范前缀的群/私聊。发言人只在群聊里带；私聊的主体就是对方。QQ 前缀未知时返回 null。
    */
   scopeFor(channel: DialogueChannel | null, speaker: DialogueSpeaker = {}): RuntimeScopePayload | null {
     if (!channel || channel.kind === 'live') return liveScope(this.botId(), this.liveSessionId(), speaker.id);
-    if (channel.kind === 'terminal') return terminalScope(this.botId(), this.terminalSessionId());
+    if (channel.kind === 'console') return consoleScope(this.botId(), this.terminalSessionId());
     return qqScope(this.botId(), this.sessionPrefix, channel.conv, channel.id, speaker.id);
   }
 
@@ -202,11 +348,11 @@ export class WaveMemoryWorld implements World {
     return this.scopeFor(line?.channel ?? null);
   }
 
-  /** 工具的 conversation 参数：live / terminal / group:<群号> / private:<QQ号>。 */
+  /** 工具的 conversation 参数：live / console / group:<群号> / private:<QQ号>；terminal 与 终端是旧别名。 */
   private conversationScope(conversation: string): RuntimeScopePayload | null {
     const text = conversation.trim();
     if (/^(live|直播间?)$/i.test(text)) return this.scopeFor({ kind: 'live' });
-    if (/^(terminal|终端)$/i.test(text)) return this.scopeFor({ kind: 'terminal' });
+    if (/^(console|terminal|终端)$/i.test(text)) return this.scopeFor({ kind: 'console' });
     const match = /^(group|private):(\d+)$/i.exec(text);
     if (!match) return null;
     return this.scopeFor({ kind: 'qq', conv: match[1].toLowerCase() as 'group' | 'private', id: match[2] });
@@ -290,7 +436,7 @@ export class WaveMemoryWorld implements World {
     return block ? `${safety}\n\n${block}` : safety;
   }
 
-  console(): WorldConsoleDecl {
+  webUi(_language?: Language): WorldWebUiDecl {
     return {
       config: [WAVEMEMORY_CONFIG_GROUP],
       promptDocs: [
@@ -361,18 +507,7 @@ export class WaveMemoryWorld implements World {
       `WaveMemory：会话地址 ${conversation || '(当前对话)'} 无效，或还没拿到 Bot 会话前缀`;
     return [
       {
-        name: 'wave_book_lore_search',
-        description: '从《没钱修什么仙》全量 1.7 万条原著设定、人物、战术与 GraphRAG 知识库中检索详细背景设定。',
-        tags: ['read'],
-        parameters: {
-          type: 'object',
-          properties: {
-            query: { type: 'string', description: '要检索的书设主题、人物名或设定名词' },
-            mode: { type: 'string', enum: ['hybrid', 'semantic', 'keyword'], description: '检索模式，默认 hybrid' },
-            top_k: { type: 'integer', description: '返回条数，默认 5 条' },
-          },
-          required: ['query'],
-        },
+        ...staticToolDecl('wave_book_lore_search'),
         handler: async (args) => {
           const res = await this.bridge.searchBookLore({
             query: String(args.query ?? ''),
@@ -389,17 +524,7 @@ export class WaveMemoryWorld implements World {
         },
       },
       {
-        name: 'wave_book_lore_graph',
-        description: '在《没钱修什么仙》原著知识图谱中查看指定实体的人际关系、宗门归属或法宝关联。',
-        tags: ['read'],
-        parameters: {
-          type: 'object',
-          properties: {
-            entity_name: { type: 'string', description: '实体完整名称（如：磁极神君、张羽）' },
-            depth: { type: 'integer', description: '遍历深度（1 或 2，默认 1）' },
-          },
-          required: ['entity_name'],
-        },
+        ...staticToolDecl('wave_book_lore_graph'),
         handler: async (args) => {
           const res = await this.bridge.graphBookLore({
             entity_name: String(args.entity_name ?? ''),
@@ -416,19 +541,7 @@ export class WaveMemoryWorld implements World {
         },
       },
       {
-        name: 'wave_recall_memory',
-        description: '从羽书的 28 万条历史记忆库中进行全文检索，回忆过往群聊事件、名场面、梗或约定。',
-        tags: ['read'],
-        parameters: {
-          type: 'object',
-          properties: {
-            query: { type: 'string', description: '要回忆的关键词或话题' },
-            speaker: { type: 'string', description: '可选的指定发言人姓名或ID' },
-            limit: { type: 'integer', description: '返回条数，默认 5 条' },
-            conversation: CONVERSATION_PARAM,
-          },
-          required: ['query'],
-        },
+        ...staticToolDecl('wave_recall_memory'),
         handler: async (args) => {
           const { scope, conversation } = this.toolScope(args);
           if (!scope) return invalidScope(conversation);
@@ -446,17 +559,7 @@ export class WaveMemoryWorld implements World {
         },
       },
       {
-        name: 'wave_query_person',
-        description: '查询某个群友或观众的人物档案、活跃度、别名以及历史印象画像。',
-        tags: ['read'],
-        parameters: {
-          type: 'object',
-          properties: {
-            target: { type: 'string', description: '用户昵称、QQ号或 bili:UID' },
-            conversation: CONVERSATION_PARAM,
-          },
-          required: ['target'],
-        },
+        ...staticToolDecl('wave_query_person'),
         handler: async (args) => {
           const { scope, conversation } = this.toolScope(args);
           if (!scope) return invalidScope(conversation);
@@ -474,20 +577,7 @@ export class WaveMemoryWorld implements World {
         },
       },
       {
-        name: 'wave_propose_fact',
-        description: '当直播间观众透露了重要的个人现实事实或稳定偏好时，向 WaveMemory 提审三元组记忆（处于待审核状态，待审期间仅作为当前观众的自述依据）。',
-        tags: ['act'],
-        parameters: {
-          type: 'object',
-          properties: {
-            subject: { type: 'string', description: '事实主体（如用户昵称或 canonical ID，不可捏造）' },
-            predicate: { type: 'string', description: '属性或关系动词（如：偏好、居住地、职业）' },
-            object: { type: 'string', description: '事实客体或属性值' },
-            source_quote: { type: 'string', description: '观众本人的发言原话引用' },
-            conversation: CONVERSATION_PARAM,
-          },
-          required: ['subject', 'predicate', 'object'],
-        },
+        ...staticToolDecl('wave_propose_fact'),
         handler: async (args) => {
           const { scope, conversation } = this.toolScope(args);
           if (!scope) return invalidScope(conversation);
@@ -509,19 +599,7 @@ export class WaveMemoryWorld implements World {
         },
       },
       {
-        name: 'wave_note_episode',
-        description: '记录直播中羽书与观众达成的重要约定、里程碑经历或关键阶段性成果。',
-        tags: ['act'],
-        parameters: {
-          type: 'object',
-          properties: {
-            trigger_text: { type: 'string', description: '引发该经历的起因或观众提议' },
-            outcome: { type: 'string', description: '经历的结果、履约情况或阶段终态' },
-            episode_type: { type: 'string', description: '经历类别，如 live_milestone / agreement / achievement' },
-            conversation: CONVERSATION_PARAM,
-          },
-          required: ['trigger_text', 'outcome'],
-        },
+        ...staticToolDecl('wave_note_episode'),
         handler: async (args) => {
           const { scope, conversation } = this.toolScope(args);
           if (!scope) return invalidScope(conversation);
@@ -540,6 +618,48 @@ export class WaveMemoryWorld implements World {
           return `【已记录经历】经历编号 ${res.data.entity.id} 已持久化归档（状态: ${res.data.domain_state}）。`;
         },
       },
+      {
+        ...staticToolDecl('wave_meme_lookup'),
+        handler: async (args) => {
+          const { scope, conversation } = this.toolScope(args);
+          if (!scope) return invalidScope(conversation);
+          const res = await this.bridge.invokeTool('wave_memory_meme_lookup', {
+            scope,
+            arguments: { keyword: String(args.keyword ?? '').trim() },
+          }, 8000);
+          if (!res.ok) return `梗百科查询失败: ${res.error?.message ?? 'unknown'}`;
+          return res.result || '(未查到该梗说明)';
+        },
+      },
+      {
+        ...staticToolDecl('wave_game_knowledge'),
+        handler: async (args) => {
+          const { scope, conversation } = this.toolScope(args);
+          if (!scope) return invalidScope(conversation);
+          const res = await this.bridge.invokeTool('wave_memory_game_knowledge', {
+            scope,
+            arguments: {
+              query: String(args.query ?? '').trim(),
+              game: String(args.game ?? '').trim(),
+            },
+          }, 8000);
+          if (!res.ok) return `游戏知识查询失败: ${res.error?.message ?? 'unknown'}`;
+          return res.result || '(无匹配游戏经验)';
+        },
+      },
+      {
+        ...staticToolDecl('wave_affinity'),
+        handler: async (args) => {
+          const { scope, conversation } = this.toolScope(args);
+          if (!scope) return invalidScope(conversation);
+          const res = await this.bridge.invokeTool('wave_memory_affinity', {
+            scope,
+            arguments: { target: String(args.target ?? '').trim() },
+          }, 8000);
+          if (!res.ok) return `关系查询失败: ${res.error?.message ?? 'unknown'}`;
+          return res.result || '(暂无关系数据)';
+        },
+      },
     ];
   }
 
@@ -551,7 +671,9 @@ export class WaveMemoryWorld implements World {
     this.warnToken(host);
     this.vtuberSeen = recentEvents(host.store, VTUBER_SCAN_WINDOW).some((e) => e.source === 'vtuber');
     this.arm();
-    if (this.opts.discoverTools) void this.refreshCapabilities(true).catch(() => false);
+    if (this.opts.discoverTools) {
+      await this.refreshCapabilities(true).catch(() => false);
+    }
     this.startSync(host);
   }
 

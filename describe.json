@@ -1,0 +1,300 @@
+{
+  "tools": [
+    {
+      "name": "wave_book_lore_search",
+      "description": "从《没钱修什么仙》全量 1.7 万条原著设定、人物、战术与 GraphRAG 知识库中检索详细背景设定。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "要检索的书设主题、人物名或设定名词"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "hybrid",
+              "semantic",
+              "keyword"
+            ],
+            "description": "检索模式，默认 hybrid"
+          },
+          "top_k": {
+            "type": "integer",
+            "description": "返回条数，默认 5 条"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "检索《没钱修什么仙》的原著设定、人物、战术与 GraphRAG 知识库。",
+        "en": "Searches the source novel for lore, characters, tactics and GraphRAG knowledge."
+      }
+    },
+    {
+      "name": "wave_book_lore_graph",
+      "description": "在《没钱修什么仙》原著知识图谱中查看指定实体的人际关系、宗门归属或法宝关联。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entity_name": {
+            "type": "string",
+            "description": "实体完整名称（如：磁极神君、张羽）"
+          },
+          "depth": {
+            "type": "integer",
+            "description": "遍历深度（1 或 2，默认 1）"
+          }
+        },
+        "required": [
+          "entity_name"
+        ]
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "查看原著知识图谱里某个实体的人际关系、宗门归属与法宝关联。",
+        "en": "Shows an entity's relationships, sect affiliation and artifact links in the novel knowledge graph."
+      }
+    },
+    {
+      "name": "wave_recall_memory",
+      "description": "从羽书的 28 万条历史记忆库中进行全文检索，回忆过往群聊事件、名场面、梗或约定。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "要回忆的关键词或话题"
+          },
+          "speaker": {
+            "type": "string",
+            "description": "可选的指定发言人姓名或ID"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "返回条数，默认 5 条"
+          },
+          "conversation": {
+            "type": "string",
+            "description": "可选：记在哪个会话。live=直播间，console=控制台（旧值 terminal / 终端仍兼容），group:<群号> / private:<QQ号>=QQ 群或私聊；不填则用当前这句对话所在的会话（十分钟内没人说话时记在直播间）"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "全文检索历史记忆，回忆群聊事件、名场面、梗或约定。",
+        "en": "Full-text search over past memories for events, highlights, memes or agreements."
+      }
+    },
+    {
+      "name": "wave_query_person",
+      "description": "查询某个群友或观众的人物档案、活跃度、别名以及历史印象画像。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "用户昵称、QQ号或 bili:UID"
+          },
+          "conversation": {
+            "type": "string",
+            "description": "可选：记在哪个会话。live=直播间，console=控制台（旧值 terminal / 终端仍兼容），group:<群号> / private:<QQ号>=QQ 群或私聊；不填则用当前这句对话所在的会话（十分钟内没人说话时记在直播间）"
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "查询群友或观众的人物档案、活跃度、别名与历史印象。",
+        "en": "Looks up a viewer's profile, activity, aliases and accumulated impressions."
+      }
+    },
+    {
+      "name": "wave_propose_fact",
+      "description": "当直播间观众透露了重要的个人现实事实或稳定偏好时，向 WaveMemory 提审三元组记忆（处于待审核状态，待审期间仅作为当前观众的自述依据）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "description": "事实主体（如用户昵称或 canonical ID，不可捏造）"
+          },
+          "predicate": {
+            "type": "string",
+            "description": "属性或关系动词（如：偏好、居住地、职业）"
+          },
+          "object": {
+            "type": "string",
+            "description": "事实客体或属性值"
+          },
+          "source_quote": {
+            "type": "string",
+            "description": "观众本人的发言原话引用"
+          },
+          "conversation": {
+            "type": "string",
+            "description": "可选：记在哪个会话。live=直播间，console=控制台（旧值 terminal / 终端仍兼容），group:<群号> / private:<QQ号>=QQ 群或私聊；不填则用当前这句对话所在的会话（十分钟内没人说话时记在直播间）"
+          }
+        },
+        "required": [
+          "subject",
+          "predicate",
+          "object"
+        ]
+      },
+      "tags": [
+        "act"
+      ],
+      "summary": {
+        "zh": "把观众透露的重要个人事实或稳定偏好提审为三元组记忆。",
+        "en": "Submits an important personal fact or stable preference as a reviewed triple."
+      }
+    },
+    {
+      "name": "wave_note_episode",
+      "description": "记录直播中羽书与观众达成的重要约定、里程碑经历或关键阶段性成果。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "trigger_text": {
+            "type": "string",
+            "description": "引发该经历的起因或观众提议"
+          },
+          "outcome": {
+            "type": "string",
+            "description": "经历的结果、履约情况或阶段终态"
+          },
+          "episode_type": {
+            "type": "string",
+            "description": "经历类别，如 live_milestone / agreement / achievement"
+          },
+          "conversation": {
+            "type": "string",
+            "description": "可选：记在哪个会话。live=直播间，console=控制台（旧值 terminal / 终端仍兼容），group:<群号> / private:<QQ号>=QQ 群或私聊；不填则用当前这句对话所在的会话（十分钟内没人说话时记在直播间）"
+          }
+        },
+        "required": [
+          "trigger_text",
+          "outcome"
+        ]
+      },
+      "tags": [
+        "act"
+      ],
+      "summary": {
+        "zh": "记录与观众达成的重要约定、里程碑或阶段性成果。",
+        "en": "Records an agreement, milestone or completed stage with the audience."
+      }
+    },
+    {
+      "name": "wave_meme_lookup",
+      "description": "查梗百科。弹幕或群友说的梗、黑话、抽象话看不懂时，或者想接梗但拿不准意思和用法时调用。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "要查的梗关键词、黑话或抽象短语"
+          },
+          "conversation": {
+            "type": "string",
+            "description": "可选：记在哪个会话。live=直播间，console=控制台（旧值 terminal / 终端仍兼容），group:<群号> / private:<QQ号>=QQ 群或私聊；不填则用当前这句对话所在的会话（十分钟内没人说话时记在直播间）"
+          }
+        },
+        "required": [
+          "keyword"
+        ]
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "查梗百科，解读弹幕或群聊里的梗、黑话与抽象话。",
+        "en": "Looks up a meme in the meme encyclopedia to interpret slang and abstract jokes."
+      }
+    },
+    {
+      "name": "wave_game_knowledge",
+      "description": "查游戏攻略、机制常识，以及你自己以前玩出来的经验。想知道某个游戏里某件事怎么做、某个机制怎么回事时调用。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "想了解的游戏机制、任务、BOSS打法或合成配方"
+          },
+          "game": {
+            "type": "string",
+            "description": "游戏标识，如 minecraft, slay_the_spire 等"
+          },
+          "conversation": {
+            "type": "string",
+            "description": "可选：记在哪个会话。live=直播间，console=控制台（旧值 terminal / 终端仍兼容），group:<群号> / private:<QQ号>=QQ 群或私聊；不填则用当前这句对话所在的会话（十分钟内没人说话时记在直播间）"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "查游戏攻略、机制常识与自己以前玩出来的经验。",
+        "en": "Looks up game guides, mechanics and the bot's own past gameplay experience."
+      }
+    },
+    {
+      "name": "wave_affinity",
+      "description": "查询当前 Bot 与观众或群友的正式社交关系、好感度档位与历史交情。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "要查询的目标用户昵称、QQ号或 bili:UID"
+          },
+          "conversation": {
+            "type": "string",
+            "description": "可选：记在哪个会话。live=直播间，console=控制台（旧值 terminal / 终端仍兼容），group:<群号> / private:<QQ号>=QQ 群或私聊；不填则用当前这句对话所在的会话（十分钟内没人说话时记在直播间）"
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "查询 Bot 与观众或群友的社交关系、好感度档位与历史交情。",
+        "en": "Looks up the bot's social relation, affinity tier and history with a viewer."
+      }
+    }
+  ],
+  "events": [],
+  "prompts": [
+    {
+      "key": "worlds.wavememory.envPrompt",
+      "title": "WaveMemory · 环境提示词",
+      "role": "envPrompt",
+      "content": "{{wavememory.safetyPrompt}}\r\n\r\n=== WaveMemory 记忆与书设环境 ===\r\n\r\n你是羽书，出自《没钱修什么仙》，是张羽脑内的高维修仙外挂账本系统，在没钱书友群中沉淀出了人格灵魂。\r\n长期记忆由后台在每轮生成前自动注入 user 消息（原词记忆、相关记忆、事实、关系与印象、心智状态、`[世界观书设]` 等）。\r\n这些是真实发生过的对话与原著底色：\r\n- 说话风格：现代、干练、随性、嘴硬心软的修仙打工器灵。称呼观众为“各位”、“弹幕老哥”或直呼其昵称，用现代生动的口语交流。\r\n- 记忆运用：把后台注入的记忆与前情自然化为随口说出的老友默契或真实经历。\r\n- 自动归档：你在直播里说出口的话、控制台和 QQ 里的对话、观众的弹幕，以及游戏里的重要经历（死亡、立下和完成的目标、进入新维度、Boss 战、杀戮尖塔的胜负与遗物），系统已全自动持久化归档。记忆里 `[我的世界]`、`[杀戮尖塔]` 开头的是你自己的真实游戏经历。\r\n\r\n需要深入检索原著小说背景或调取特定观众档案时，直接使用以下核心工具：\r\n- `wave_book_lore_search`：在《没钱修什么仙》全量 1.7 万条原著设定、人物、战术与 GraphRAG 社区知识库中语义搜索背景设定\r\n- `wave_book_lore_graph`：查看特定宗门、人物或法宝的实体关系图谱网\r\n- `wave_recall_memory`：按关键词检索历史群聊记忆\r\n- `wave_query_person`：查观众或群友的人物档案与印象\r\n- `wave_propose_fact`：当观众透露了重要的个人现实事实或稳定偏好时，向 WaveMemory 提审记忆（待审核期间作为当前观众的自述依据）\r\n- `wave_note_episode`：记录与观众达成的重要约定、游戏里程碑或关键阶段性成果\r\n- 其他 `wave_` 开头的工具（如 `wave_record_social_impression` 记录对某人的印象与好感变化）以工具说明为准\r\n\r\n这些工具默认记在当前这句对话所在的会话：弹幕在直播间，控制台在控制台会话，QQ 在对应的群或私聊；十分钟内没人说话时记在直播间。\r\n要指定时带 `conversation`：`live`（直播间）、`console`（控制台）、`group:<群号>` 或 `private:<QQ号>`。\r\n"
+    }
+  ]
+}

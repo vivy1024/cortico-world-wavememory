@@ -6,7 +6,11 @@ export type WaveMemoryTier = 'full' | 'light' | 'minimal';
 /** 部署 .env 里的 Runtime 令牌名，与 WaveMemory 服务端读取的环境变量同名。 */
 export const WAVEMEMORY_TOKEN_SECRET = 'WAVEMEMORY_RUNTIME_TOKEN';
 
-/** 终端（操作员控制台）对话默认记在这条私聊会话下；与写入同一条线。 */
+/**
+ * 控制台（World `console`）对话默认记在这条私聊会话下；与写入同一条线。
+ * 注意：`terminal:private:operator` 是历史会话 id，部署配置与既有记忆线都绑定这个字面量，
+ * 不要跟着 World 改名迁移。
+ */
 export const DEFAULT_TERMINAL_SESSION_ID = 'terminal:private:operator';
 
 export type TokenOrigin = 'secret' | 'config' | 'none';
@@ -45,11 +49,11 @@ export interface WaveMemoryConfigSection extends WorldSection {
   botId: string;
   /** 直播间会话 session_id，如 bilibili:group:24292304；弹幕、口播和游戏经历都记在这里 */
   sessionId: string;
-  /** 终端对话的会话 session_id，默认 terminal:private:operator；可改成主人的 QQ 私聊会话 */
+  /** 控制台对话的会话 session_id，默认 terminal:private:operator（历史会话 id，不要迁移）；可改成主人的 QQ 私聊会话 */
   terminalSessionId?: string;
   /** 注入分层：full / light / minimal（首轮总是 full，之后按这里；默认每轮 full） */
   tier: WaveMemoryTier;
-  /** 把 QQ 消息、弹幕、终端对话、自己说的话和游戏经历同步写入 WaveMemory */
+  /** 把 QQ 消息、弹幕、控制台对话、自己说的话和游戏经历同步写入 WaveMemory */
   sync: boolean;
   /** 同步间隔（毫秒） */
   syncIntervalMs: number;
@@ -101,7 +105,7 @@ export const WAVEMEMORY_CONFIG_GROUP: ConfigGroup = {
       },
       'worlds.wavememory.terminalSessionId': {
         type: 'string',
-        title: '终端对话会话 session_id（默认 terminal:private:operator）',
+        title: '控制台对话会话 session_id（默认历史值 terminal:private:operator）',
       },
       'worlds.wavememory.tier': {
         type: 'string',

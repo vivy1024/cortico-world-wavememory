@@ -10,16 +10,16 @@ export function hashQuery(text: string): string {
 export const RECENT_WINDOW = 500;
 
 /**
- * 一句对话来自哪里：直播间弹幕、终端（操作员控制台）、QQ 群/私聊。
+ * 一句对话来自哪里：直播间弹幕、控制台（World `console`）、QQ 群/私聊。
  * 读取（注入、工具默认会话）与写入（sync.ts）用同一套划分。
  */
 export type DialogueChannel =
   | { kind: 'live' }
-  | { kind: 'terminal' }
+  | { kind: 'console' }
   | { kind: 'qq'; conv: 'group' | 'private'; id: string };
 
 export interface DialogueSpeaker {
-  /** 平台内的用户号：B 站 uid、QQ 号；终端操作员没有 */
+  /** 平台内的用户号：B 站 uid、QQ 号；控制台操作员没有 */
   id?: string;
   name?: string;
 }
@@ -54,11 +54,11 @@ export function dialogueLine(e: EventEnvelope): DialogueLine | null {
       speaker: { ...(uid && uid !== '0' ? { id: uid } : {}), ...(name ? { name } : {}) },
     };
   }
-  if (e.type === 'terminal.message' && e.source === 'terminal') {
+  if (e.type === 'console.message' && e.source === 'console') {
     const body = str(meta.body) || str(e.text).replace(/^\[[^\]]*\]\s*[^:：]{1,40}[:：]\s*/, '');
     if (!body) return null;
     const name = str(meta.from) || str(e.senderKey);
-    return { cursor: e.cursor, ts: e.ts, channel: { kind: 'terminal' }, body, speaker: name ? { name } : {} };
+    return { cursor: e.cursor, ts: e.ts, channel: { kind: 'console' }, body, speaker: name ? { name } : {} };
   }
   if (e.type === 'qq.message' && e.source === 'qq') {
     const conv = meta.conv as { kind?: string; id?: unknown } | undefined;
@@ -114,7 +114,7 @@ export interface RecallQuery {
 
 /**
  * 投递时刻读取「本轮该围绕什么检索」：最近一句对话所在的那条会话里，最后几句拼起来。
- * 只看人说的话（弹幕、终端输入、QQ 消息），游戏机器事件不参与检索，
+ * 只看人说的话（弹幕、控制台输入、QQ 消息），游戏机器事件不参与检索，
  * 防止游戏状态误召回无关历史闲聊。
  */
 export function recallQueryText(store: EventStoreReader, limit = 3): RecallQuery {
