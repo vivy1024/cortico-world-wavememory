@@ -164,6 +164,32 @@ describe('WaveMemoryWorld 注入', () => {
     });
   });
 
+  it('直播间：只请求「别人」的通道，剥书设、QQ 群的行照常保留，注入项标 ephemeral', async () => {
+    const calls: any[] = [];
+    const bridge = new WaveMemoryBridge('http://127.0.0.1:9876', mockFetch((_url, body) => {
+      calls.push(body);
+      return {
+        ok: true,
+        block: [
+          '[世界观书设：常驻]\n- 书设一行',
+          '<exact_memory>\n[原词命中][群 24292304] 阿木(09-30 20:00): 直播间旧话 (relevance: 1.00)\n[原词命中][群 398291136] 群友(09-01 10:00): 群里旧话 (relevance: 1.00)\n</exact_memory>',
+          '你对这个人的印象：老观众',
+        ].join('\n\n'),
+      };
+    }));
+    const host = new FakeHost();
+    const world = new WaveMemoryWorld({ cfg: cfg(), timezone: 'Asia/Shanghai', bridge, now: () => NOW });
+    await world.start(host);
+    danmaku(host.store, '主播还记得我吗');
+    expect(host.deferred[0].spec.ephemeral).toBe(true);
+    const text = await host.deferred[0].spec.render();
+    expect(calls[0].channels).toEqual(['safety', 'memory', 'fts5', 'facts', 'affinity', 'meme_hint', 'jargon', 'game_knowledge']);
+    expect(text).toContain('直播间旧话');
+    expect(text).toContain('你对这个人的印象：老观众');
+    expect(text).toContain('群里旧话');
+    expect(text).not.toContain('世界观书设');
+  });
+
   it('无对话时 render 返回 null，不打桥', async () => {
     const spy = vi.fn();
     const bridge = new WaveMemoryBridge('http://127.0.0.1:8030', mockFetch(() => {

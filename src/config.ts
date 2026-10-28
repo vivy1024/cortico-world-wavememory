@@ -57,6 +57,8 @@ export interface WaveMemoryConfigSection extends WorldSection {
   sync: boolean;
   /** 同步间隔（毫秒） */
   syncIntervalMs: number;
+  /** 自动注入块总长上限（字符，默认 1500；0 不封顶） */
+  maxBlockChars?: number;
 }
 
 export const WAVEMEMORY_DEFAULTS = (): WaveMemoryConfigSection => ({
@@ -119,6 +121,11 @@ export const WAVEMEMORY_CONFIG_GROUP: ConfigGroup = {
       'worlds.wavememory.syncIntervalMs': {
         type: 'number',
         title: '同步间隔（毫秒，默认 15000）',
+      },
+      'worlds.wavememory.maxBlockChars': {
+        type: 'number',
+        title: '自动注入块总长上限（字符，默认 1500；0 不封顶）',
+        description: '超出时先从最长的记忆段尾部（相关度最低的行）逐行削，不截半行。',
       },
     },
   },

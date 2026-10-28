@@ -42,6 +42,8 @@ export interface InjectRequest {
   orchestrate?: boolean;
   scope?: RuntimeScopePayload;
   game?: GameContextPayload;
+  /** 只跑这些注入通道（与档位取交集）；不给时按档位全跑。 */
+  channels?: readonly string[];
 }
 
 export interface InjectResponse {
@@ -395,6 +397,7 @@ export class WaveMemoryBridge {
           orchestrate: req.orchestrate ?? false,
           scope: req.scope,
           ...(req.game ? { game: req.game } : {}),
+          ...(req.channels ? { channels: [...req.channels] } : {}),
         }),
         signal: ctrl.signal,
       });

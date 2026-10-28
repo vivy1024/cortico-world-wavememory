@@ -37,6 +37,7 @@ import {
   type DialogueSpeaker,
 } from './recall-query.ts';
 import { liveScope, qqScope, consoleScope } from './sessions.ts';
+import { filterInjectionBlock } from './block-filter.ts';
 import { CallLedger, captureTap } from './speech.ts';
 import { ObservationSync, SYNC_CURSOR_FILE } from './sync.ts';
 
@@ -47,6 +48,17 @@ const RENDER_BUDGET_MS = 2500;
 const FRESH_MS = 90_000;
 const STALE_MS = 90_000;
 const ARM_STALE_MS = 60_000;
+/**
+ * 自动注入只要「别人」的记忆：原词/相关记忆、事实、关系印象、梗与黑话、游戏攻略，外加身份安全守卫。
+ * 人设（persona / soul_state / belief）、书设（book_lore）、示例对话（fewshot）与第一人称经历
+ * （character_experience）归 Cortico 的 CONSTITUTION 与工作区笔记，一件事只写一处。
+ * 服务端按请求的 channels 与档位取交集，不改它的全局配置。
+ */
+export const INJECT_CHANNELS: readonly string[] = [
+  'safety', 'memory', 'fts5', 'facts', 'affinity', 'meme_hint', 'jargon', 'game_knowledge',
+];
+/** 注入块默认总长上限（字符）；部署可用 worlds.wavememory.maxBlockChars 改。 */
+export const DEFAULT_MAX_BLOCK_CHARS = 1500;
 /** 工具不带 conversation 时，最近一句对话在这么久以内才沿用它的会话，否则记在直播间。 */
 const TOOL_CHANNEL_MAX_AGE_MS = 10 * 60_000;
 /** 启动时往回找这么多条事件，看 vtuber World 在不在（决定要不要挂输出旁路）。 */
@@ -276,6 +288,8 @@ export class WaveMemoryWorld implements World {
   private readonly bridge: WaveMemoryBridge;
   private remoteTools: RuntimeToolInfo[] = [];
   private sessionPrefix = '';
+  /** 她在 WaveMemory 里的名字（capabilities 的 bot.name）；注入块按它剔除她自己的旧话。 */
+  private selfName = '羽书';
   private capabilitiesAt = 0;
   private sync: ObservationSync | null = null;
   private syncTimer: ReturnType<typeof setInterval> | null = null;
@@ -493,6 +507,8 @@ export class WaveMemoryWorld implements World {
     this.capabilitiesAt = Date.now();
     this.remoteTools = res.data.tools ?? [];
     this.sessionPrefix = res.data.bot?.session_prefix ?? '';
+    const name = res.data.bot?.name?.trim();
+    if (name) this.selfName = name;
     return true;
   }
 
@@ -766,6 +782,8 @@ export class WaveMemoryWorld implements World {
         type: 'wavememory.context',
         origin: 'internal',
         tags: ['snapshot'],
+        // 每轮都会按最新对话重新取，旧块留在 session 里只会累积；下一批投递前由 Core 抹掉。
+        ephemeral: true,
         render: () => this.render(),
       },
       { trigger: 'piggyback' },
@@ -823,6 +841,19 @@ export class WaveMemoryWorld implements World {
     }
   }
 
+  /** 客户端整形（见 block-filter.ts）：剥常驻书设、剔除她自己的旧话、总长封顶；不按会话过滤。 */
+  private shapeBlock(block: string): string | null {
+    const maxChars = this.opts.cfg.maxBlockChars ?? DEFAULT_MAX_BLOCK_CHARS;
+    const shaped = filterInjectionBlock(block, { maxChars, selfNames: [this.selfName] });
+    if (shaped.droppedLines > 0 || shaped.trimmedLines > 0 || shaped.truncatedParagraphs > 0) {
+      this.host?.log.debug?.(
+        `[wavememory] 注入块整形：剔除自己的旧话 ${shaped.droppedLines} 行，封顶削 ${shaped.trimmedLines} 行/${shaped.truncatedParagraphs} 段，`
+        + `${block.length} → ${shaped.text.length} 字`,
+      );
+    }
+    return shaped.text.trim() ? shaped.text : null;
+  }
+
   /** stale 缓存回退：只在同一会话、同一发言人时兜底（防止把 A 观众的记忆塞给 B 观众）。 */
   private staleOrNull(owner: string): string | null {
     if (!this.cache || Date.now() - this.cache.at >= STALE_MS) return null;
@@ -843,12 +874,13 @@ export class WaveMemoryWorld implements World {
       tier: this.currentTier(),
       orchestrate: false,
       scope,
+      channels: INJECT_CHANNELS,
       ...(game ? { game } : {}),
     }, this.budgetMs()).then((res) => {
       if (this.inflight?.key === key) this.inflight = null;
       if (res.ok && typeof res.safety_prompt === 'string') this.noteSafetyPrompt(res.safety_prompt);
       if (!res.ok || !res.block) return null;
-      return res.block;
+      return this.shapeBlock(res.block);
     }).catch(() => {
       if (this.inflight?.key === key) this.inflight = null;
       return null;
