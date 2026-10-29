@@ -12,8 +12,8 @@ importers:
         specifier: ^22.10.0
         version: 22.20.4
       cortico:
-        specifier: ^0.2.4
-        version: 0.2.4
+        specifier: ^0.2.6
+        version: 0.2.6
       tsx:
         specifier: ^4.19.2
         version: 4.23.15
@@ -651,8 +651,8 @@ packages:
     resolution: {integrity: sha512-6DnInpx7SJ2AK3+CTUE/ZM0vWTUboZCegxhC2xiIydHR9jNuTAASBrfEpHhiGOZw/nX51bHt6YQl8jsGo4y/0w==}
     engines: {node: '>= 0.6'}
 
-  cortico@0.2.4:
-    resolution: {integrity: sha512-Gj1LIFxglPl+AXPaCuH1BMa2+/UDDyix3eFQjUWT8daDLeafl4E7rRUd9RzEU4WBNY053nBMpm/t7y04Rlo16g==}
+  cortico@0.2.6:
+    resolution: {integrity: sha512-0/tYp6DfZEGWeg4nfKPKBwKVzeB9P0/jqxEHQgYIPJQ9CpW8BPDtpoGjM6w1IvgIMqmz57o9aWOJ9ViNnEKpNg==}
     engines: {node: '>=22'}
 
   csstype@3.2.3:
@@ -866,8 +866,8 @@ packages:
     resolution: {integrity: sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==}
     engines: {node: '>= 0.4'}
 
-  on-finished@2.4.1:
-    resolution: {integrity: sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg==}
+  on-finished@2.4.2:
+    resolution: {integrity: sha512-ATWUv387i+nLD49EiDoOft5scf32Vsdz3ktrQJG9bi7jRFmaXTssvyvj1EmeKVVgvesbqUtvQQvaS2TpTukAZQ==}
     engines: {node: '>= 0.8'}
 
   parseurl@1.3.3:
@@ -1530,7 +1530,7 @@ snapshots:
       destroy: 1.2.0
       http-errors: 2.0.1
       iconv-lite: 0.4.24
-      on-finished: 2.4.1
+      on-finished: 2.4.2
       qs: 6.16.0
       raw-body: 2.5.3
       type-is: 1.6.18
@@ -1574,7 +1574,7 @@ snapshots:
 
   cookie@0.7.1: {}
 
-  cortico@0.2.4:
+  cortico@0.2.6:
     dependencies:
       '@types/express': 4.17.25
       '@types/react': 19.3.0
@@ -1721,7 +1721,7 @@ snapshots:
       http-errors: 2.0.1
       merge-descriptors: 1.0.3
       methods: 1.1.2
-      on-finished: 2.4.1
+      on-finished: 2.4.2
       parseurl: 1.3.3
       path-to-regexp: 0.1.13
       proxy-addr: 2.0.8
@@ -1747,7 +1747,7 @@ snapshots:
       debug: 2.6.9
       encodeurl: 2.0.0
       escape-html: 1.0.3
-      on-finished: 2.4.1
+      on-finished: 2.4.2
       parseurl: 1.3.3
       statuses: 2.0.2
       unpipe: 1.0.0
@@ -1843,7 +1843,7 @@ snapshots:
 
   object-inspect@1.13.4: {}
 
-  on-finished@2.4.1:
+  on-finished@2.4.2:
     dependencies:
       ee-first: 1.1.1
 
@@ -1948,7 +1948,7 @@ snapshots:
       http-errors: 2.0.1
       mime: 1.6.0
       ms: 2.1.3
-      on-finished: 2.4.1
+      on-finished: 2.4.2
       range-parser: 1.2.1
       statuses: 2.0.2
     transitivePeerDependencies:
